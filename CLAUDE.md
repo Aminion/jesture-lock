@@ -13,7 +13,7 @@ Two firmwares share the same IMU driver and the same recognition core (`core/`):
 Flash one or the other. Results of both paths on the same recording must match bit for bit.
 
 ## Stack
-- Firmware: C++23, no exceptions, no RTTI, no heap. Not OOP: plain structs plus
+- Firmware: C++26 (limited to what arm-none-eabi-gcc supports), no exceptions, no RTTI, no heap. Not OOP: plain structs plus
   free functions, with `std::expected`/`optional`/`variant`/`span`.
   CMSIS + ST LL drivers, no HAL.
 - Desktop: Rust (stable), egui/eframe for the viewer. No Python.

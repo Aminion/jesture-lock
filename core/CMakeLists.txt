@@ -13,7 +13,7 @@ target_include_directories(gesture_core PUBLIC
     $<INSTALL_INTERFACE:include>
 )
 
-target_compile_features(gesture_core PUBLIC cxx_std_23)
+target_compile_features(gesture_core PUBLIC cxx_std_26)
 set_target_properties(gesture_core PROPERTIES CXX_EXTENSIONS OFF)
 target_compile_options(gesture_core PRIVATE
     -fno-exceptions -fno-rtti
