@@ -33,7 +33,8 @@ Flash one or the other. Results of both paths on the same recording must match b
 - `fw/hal/`: clocks, pins, I2C/UART/LSM6DS3 drivers.
 - `fw/apps/stream/`, `fw/apps/recognize/`: the two firmwares, `main.cpp` only.
 - `host/`: Rust workspace: `protocol`, `gesture-core` (FFI), `gesture-cli`, `viewer`.
-- `docs/`: `protocol.md` (the C++/Rust contract), `template_format.md`.
+- `docs/`: `protocol.md` (the C++/Rust contract), `template_format.md`, `pinout.md` (MCU pins and IMU wiring),
+  `datasheets/` (vendor PDFs, gitignored; manifest + checksums committed).
 - `data/`: recorded sessions.
 
 ## Commands
@@ -49,5 +50,7 @@ Flash one or the other. Results of both paths on the same recording must match b
 - Time comes from the MCU, never from the PC receive time.
 - Protocol changes: update `docs/protocol.md` first, then both sides.
 - List source files explicitly in CMake. `git add` new files (flakes ignore untracked ones).
-- Check register usage against RM0444.
+- Check register usage against RM0444. Vendor docs: `docs/datasheets/` (local PDFs + `.txt`
+  copies, see its README); grep the `.txt` instead of fetching from the web.
+- Pin changes: update `docs/pinout.md` in the same commit.
 - Count RAM before adding any buffer (only 8 KB total).

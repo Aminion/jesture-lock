@@ -5,3 +5,6 @@ result-*
 .direnv/
 compile_commands.json
 .cache/
+/docs/datasheets/*.pdf
+/docs/datasheets/*.txt
+!/docs/datasheets/manifest.txt

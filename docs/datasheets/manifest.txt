@@ -1,0 +1,11 @@
+# Reference documents: <id> <official URL>. The local file name is the URL's basename.
+# Fetched by hand (st.com rejects scripted downloads), checked with SHA256SUMS.
+rm0444 https://www.st.com/resource/en/reference_manual/rm0444-stm32g0x1-advanced-armbased-32bit-mcus-stmicroelectronics.pdf
+ds12992 https://www.st.com/resource/en/datasheet/stm32g031c6.pdf
+es0486 https://www.st.com/resource/en/errata_sheet/es0486-stm32g031x4x6x8-and-stm32g041x6x8-device-errata-stmicroelectronics.pdf
+pm0223 https://www.st.com/resource/en/programming_manual/pm0223-stm32-cortexm0-mcus-programming-manual-stmicroelectronics.pdf
+um2591 https://www.st.com/resource/en/user_manual/um2591-stm32g0-nucleo32-board-mb1455-stmicroelectronics.pdf
+# lsm6ds3: st.com no longer serves it (NRND part); SparkFun copy of ST DM00133076 (DocID026899).
+lsm6ds3 https://cdn.sparkfun.com/assets/learn_tutorials/4/1/6/DM00133076.pdf
+an4650 https://www.st.com/resource/en/application_note/an4650-lsm6ds3-alwayson-3d-accelerometer-and-3d-gyroscope-stmicroelectronics.pdf
+lsm6ds3tr-c https://www.st.com/resource/en/datasheet/lsm6ds3tr-c.pdf

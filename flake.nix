@@ -65,6 +65,9 @@
               stlink
               tio
 
+              # Docs: pdftotext for docs/datasheets
+              poppler-utils
+
               # Rust
               cargo
               rustc
