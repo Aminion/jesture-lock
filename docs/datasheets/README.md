@@ -22,6 +22,6 @@ update the revision column below, commit both.
 | es0486      | STM32G031/G041 errata sheet                | silicon bugs, check before blaming the code   | Rev 7 |
 | pm0223      | Cortex-M0+ programming manual              | core, NVIC, SysTick, instruction timing       | Rev 10 |
 | um2591      | Nucleo-32 STM32G0 board user manual (MB1455) | headers, solder bridges, LEDs, ST-LINK VCP  | Rev 2 |
-| lsm6ds3     | LSM6DS3 datasheet                          | the fitted IMU (WHO_AM_I 0x69): register map  | DocID026899 Rev 4 |
-| an4650      | LSM6DS3 application note                   | FIFO, interrupts, power modes, startup        |     |
+| lsm6ds3     | LSM6DS3 datasheet                          | the fitted IMU (WHO_AM_I 0x69): register map  | DocID026899 Rev 10 |
+| an4650      | LSM6DS3 application note                   | FIFO, interrupts, power modes, startup        | DocID027415 Rev 1 |
 | lsm6ds3tr-c | LSM6DS3TR-C datasheet                      | the common 0x6A variant on other GY modules   | DocID030071 Rev 3 |
