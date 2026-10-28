@@ -1,0 +1,17 @@
+[package]
+name = "viewer"
+description = "egui viewer for recorded sessions"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+eframe = "0.37.0"
+egui = "0.37.0"
+egui_plot = "0.38.0"
+gesture-core.workspace = true
+protocol.workspace = true

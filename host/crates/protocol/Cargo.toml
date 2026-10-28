@@ -1,0 +1,12 @@
+[package]
+name = "protocol"
+description = "Wire protocol (COBS, CRC16, messages); mirrors docs/protocol.md and fw/proto"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]

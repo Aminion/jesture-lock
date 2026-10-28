@@ -1,0 +1,47 @@
+{
+  "version": 6,
+  "cmakeMinimumRequired": { "major": 3, "minor": 25, "patch": 0 },
+  "configurePresets": [
+    {
+      "name": "base",
+      "hidden": true,
+      "generator": "Ninja",
+      "cacheVariables": {
+        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
+      }
+    },
+    {
+      "name": "firmware",
+      "displayName": "STM32G031K8 firmware (arm-none-eabi)",
+      "inherits": "base",
+      "binaryDir": "${sourceDir}/build/firmware",
+      "toolchainFile": "${sourceDir}/cmake/arm-none-eabi.cmake",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "MinSizeRel",
+        "CMSIS_CORE_DIR": "$env{CMSIS_CORE_DIR}",
+        "CMSIS_DEVICE_G0_DIR": "$env{CMSIS_DEVICE_G0_DIR}",
+        "STM32G0_LL_DIR": "$env{STM32G0_LL_DIR}"
+      }
+    },
+    {
+      "name": "host",
+      "displayName": "Host build (core + proto + tests)",
+      "inherits": "base",
+      "binaryDir": "${sourceDir}/build/host",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug"
+      }
+    }
+  ],
+  "buildPresets": [
+    { "name": "firmware", "configurePreset": "firmware" },
+    { "name": "host", "configurePreset": "host" }
+  ],
+  "testPresets": [
+    {
+      "name": "host",
+      "configurePreset": "host",
+      "output": { "outputOnFailure": true }
+    }
+  ]
+}

@@ -1,0 +1,24 @@
+[workspace]
+resolver = "3"
+members = ["crates/protocol", "crates/gesture-core", "crates/gesture-cli", "crates/viewer"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+publish = false
+
+[workspace.dependencies]
+protocol = { path = "crates/protocol" }
+gesture-core = { path = "crates/gesture-core" }
+
+[workspace.lints.rust]
+unsafe_op_in_unsafe_fn = "deny"
+missing_debug_implementations = "warn"
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }
+undocumented_unsafe_blocks = "warn"
+
+[profile.release]
+debug = true
