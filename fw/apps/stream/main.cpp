@@ -8,8 +8,12 @@
 #include "proto/crc16.hpp"
 
 int main() {
-    // TODO: clocks, pins, UART, I2C, detect IMU, configure.
+    hal::clock_init();
+    hal::led_init();
+    // TODO: pins, UART, I2C, detect IMU, configure.
     for (;;) {
-        // TODO: read sample, timestamp, frame, send.
+        // TODO: read sample, timestamp, frame, send. Blink is a board bring-up placeholder.
+        hal::led_toggle();
+        hal::delay_ms(500);
     }
 }
