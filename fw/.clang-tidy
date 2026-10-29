@@ -1,0 +1,6 @@
+---
+# Firmware on top of the root config. Peripheral register pointers (USART2, GPIOA) and
+# state shared with ISRs are global by nature here; core/ keeps the check (no global state).
+InheritParentConfig: true
+Checks: >
+  -cppcoreguidelines-avoid-non-const-global-variables

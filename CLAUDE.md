@@ -46,6 +46,8 @@ Flash one or the other. Results of both paths on the same recording must match b
 ## Rules
 - `core/` has no I/O, no platform code, no clock access, no global state.
   Integer arithmetic only, on raw IMU LSB (widen int16 to int32/uint32 immediately).
+  Where a result can overflow or must fit back into int16, use C++26 saturation
+  (`std::add_sat`/`sub_sat`/`mul_sat`, `std::saturate_cast`) instead of hand-written clamps.
   Physical units (g, deg/s) are for the viewer only.
 - Time comes from the MCU, never from the PC receive time.
 - Protocol changes: update `docs/protocol.md` first, then both sides.
@@ -54,3 +56,11 @@ Flash one or the other. Results of both paths on the same recording must match b
   copies, see its README); grep the `.txt` instead of fetching from the web.
 - Pin changes: update `docs/pinout.md` in the same commit.
 - Count RAM before adding any buffer (only 8 KB total).
+- Prefer standard facilities over hand-rolled code (`<bit>`, `<charconv>`, `<ranges>`,
+  `std::to_underlying`, `std::span`, `[[nodiscard]]`, `constexpr`/`consteval` for tables
+  and checks). Before relying on a C++26 library feature, build it with the firmware
+  toolchain (GCC 15 lacks contracts and `<inplace_vector>`). `std::atomic` on Cortex-M0+
+  is load/store only: read-modify-write needs libatomic, which is not linked.
+- clang-tidy runs on every first-party C++ file during the build (both presets), warnings
+  are errors. Fix the code; disable a check only in `.clang-tidy` (or `fw/.clang-tidy`
+  for firmware-only exceptions) with a comment, or `NOLINTNEXTLINE(check)` with a reason.

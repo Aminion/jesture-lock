@@ -9,7 +9,9 @@ Checks: >
   -cppcoreguidelines-avoid-magic-numbers,
   -readability-magic-numbers,
   -modernize-use-trailing-return-type,
-  -readability-identifier-length
-WarningsAsErrors: ''
+  -readability-identifier-length,
+  -cppcoreguidelines-pro-bounds-constant-array-index
+# pro-bounds-constant-array-index: its fix is gsl::at; we do not use GSL.
+WarningsAsErrors: '*'
 HeaderFilterRegex: '/(core|fw)/'
 ---

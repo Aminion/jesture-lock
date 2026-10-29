@@ -47,7 +47,7 @@ void bus_clear() {
         LL_GPIO_SetPinMode(port, pin, LL_GPIO_MODE_OUTPUT);
     }
     half_bit_delay();
-    for (int i = 0; i < 9 && !LL_GPIO_IsInputPinSet(port, sda_pin); ++i) {
+    for (int i = 0; i < 9 && LL_GPIO_IsInputPinSet(port, sda_pin) == 0U; ++i) {
         LL_GPIO_ResetOutputPin(port, scl_pin);
         half_bit_delay();
         LL_GPIO_SetOutputPin(port, scl_pin);
@@ -88,14 +88,16 @@ Result wait_for(std::uint32_t isr_flag) {
 // by reading it back. It clears every ISR state flag.
 void recover() {
     const std::uint32_t start = hal::millis();
-    while (!LL_I2C_IsActiveFlag_STOP(bus) && hal::millis() - start <= timeout_ms) {
+    while (LL_I2C_IsActiveFlag_STOP(bus) == 0U && hal::millis() - start <= timeout_ms) {
     }
     LL_I2C_Disable(bus);
-    while (LL_I2C_IsEnabled(bus)) {
+    while (LL_I2C_IsEnabled(bus) != 0U) {
     }
     LL_I2C_Enable(bus);
 }
 
+// Only called by the public wrappers, which take the 7-bit address and shift it.
+// NOLINTNEXTLINE(bugprone-easily-swappable-parameters)
 Result write_regs(std::uint32_t sadd, std::uint8_t reg, std::span<const std::uint8_t> data) {
     LL_I2C_HandleTransfer(bus, sadd, LL_I2C_ADDRSLAVE_7BIT, 1 + data.size(),
                           LL_I2C_MODE_AUTOEND, LL_I2C_GENERATE_START_WRITE);
@@ -116,6 +118,7 @@ Result write_regs(std::uint32_t sadd, std::uint8_t reg, std::span<const std::uin
     return {};
 }
 
+// NOLINTNEXTLINE(bugprone-easily-swappable-parameters)
 Result read_regs(std::uint32_t sadd, std::uint8_t reg, std::span<std::uint8_t> out) {
     LL_I2C_HandleTransfer(bus, sadd, LL_I2C_ADDRSLAVE_7BIT, 1, LL_I2C_MODE_SOFTEND,
                           LL_I2C_GENERATE_START_WRITE);
