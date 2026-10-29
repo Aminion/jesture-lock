@@ -6,6 +6,7 @@
 // kernel clock is always PCLK = 16 MHz.
 
 #include <cstdint>
+#include <limits>
 #include <optional>
 #include <span>
 
@@ -39,7 +40,8 @@ constexpr bool uart_baud_ok(std::uint32_t baud) {
         return false;
     }
     const std::uint32_t brr = uart_brr(baud);
-    return brr >= 16 && brr <= 0xFFFF && uart_baud_error_ppm(baud) <= uart_max_baud_error_ppm;
+    return brr >= 16 && brr <= std::numeric_limits<std::uint16_t>::max() &&
+           uart_baud_error_ppm(baud) <= uart_max_baud_error_ppm;
 }
 
 // Uses uart_brr(); check `baud` with uart_baud_ok() at compile time.

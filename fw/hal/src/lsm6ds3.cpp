@@ -26,7 +26,7 @@ constexpr std::uint8_t status_gda = 1U << 1U;
 static_assert(hal::lsm6ds3_ctrl1_xl == (odr_104hz | fs_xl_2g));
 static_assert(hal::lsm6ds3_ctrl2_g == (odr_104hz | fs_g_250dps));
 
-constexpr std::array<std::uint8_t, 2> addresses{0x6B, 0x6A};
+constexpr std::array addresses{hal::lsm6ds3_addr_sa0_high, hal::lsm6ds3_addr_sa0_low};
 
 } // namespace
 

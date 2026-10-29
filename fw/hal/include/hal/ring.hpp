@@ -27,11 +27,17 @@ struct Ring {
     volatile std::uint8_t tail = 0;
 };
 
+// Index after `i`, wrapping at N.
+template <std::size_t N>
+[[nodiscard]] constexpr std::uint8_t ring_next(std::uint8_t i) {
+    return static_cast<std::uint8_t>((i + 1U) & (N - 1));
+}
+
 // Producer side. false (byte dropped) if the ring holds N - 1 bytes.
 template <std::size_t N>
 [[nodiscard]] bool ring_push(Ring<N>& ring, std::uint8_t byte) {
     const std::uint8_t head = ring.head;
-    const auto next = static_cast<std::uint8_t>((head + 1U) & (N - 1));
+    const std::uint8_t next = ring_next<N>(head);
     if (next == ring.tail) {
         return false;
     }
@@ -54,7 +60,7 @@ template <std::size_t N>
     std::atomic_signal_fence(std::memory_order_acquire);
     const std::uint8_t byte = ring.buf[tail];
     std::atomic_signal_fence(std::memory_order_release);
-    ring.tail = static_cast<std::uint8_t>((tail + 1U) & (N - 1));
+    ring.tail = ring_next<N>(tail);
     return byte;
 }
 

@@ -37,12 +37,18 @@ struct PortArgs {
     /// Serial device of the ST-LINK virtual COM port.
     #[arg(long, default_value = "/dev/ttyACM0")]
     port: String,
-    #[arg(long, default_value_t = 115_200)]
+    #[arg(long, default_value_t = protocol::BAUD)]
     baud: u32,
 }
 
 /// Longest payload the firmware echoes without truncation (72-byte line minus "echo " and CRLF).
 const MAX_ECHO: usize = 64;
+
+/// Read chunk size; the port timeout, not the buffer, paces the loops.
+const READ_BUF: usize = 256;
+
+/// How long `echo` waits for each line to come back.
+const ECHO_TIMEOUT: Duration = Duration::from_secs(1);
 
 fn open(PortArgs { port, baud }: &PortArgs) -> anyhow::Result<Box<dyn SerialPort>> {
     serialport::new(port, *baud)
@@ -85,7 +91,7 @@ fn read_line(
         if Instant::now() >= deadline {
             return Ok(None);
         }
-        let mut buf = [0u8; 256];
+        let mut buf = [0u8; READ_BUF];
         let n = read_some(serial, &mut buf)?;
         pending.extend_from_slice(&buf[..n]);
     }
@@ -95,7 +101,7 @@ fn read_line(
 fn drain(serial: &mut dyn SerialPort, quiet: Duration) -> anyhow::Result<()> {
     serial.clear(ClearBuffer::Input)?;
     let mut last = Instant::now();
-    let mut buf = [0u8; 256];
+    let mut buf = [0u8; READ_BUF];
     while last.elapsed() < quiet {
         if read_some(serial, &mut buf)? > 0 {
             last = Instant::now();
@@ -118,10 +124,10 @@ fn echo(port: &PortArgs, count: u32) -> anyhow::Result<()> {
         let sent = prefix.clone() + &payload(i, (i as usize * 7) % (MAX_ECHO - prefix.len() + 1));
         let start = Instant::now();
         serial.write_all(format!("{sent}\n").as_bytes())?;
-        let deadline = start + Duration::from_secs(1);
+        let deadline = start + ECHO_TIMEOUT;
         loop {
             let Some(line) = read_line(serial.as_mut(), &mut pending, deadline)? else {
-                bail!("line {i}: no echo within 1 s (sent {sent:?})");
+                bail!("line {i}: no echo within {ECHO_TIMEOUT:?} (sent {sent:?})");
             };
             // Status lines, and a garbled first line left over in the VCP, are not echoes.
             let Some(got) = line.strip_prefix("echo ") else {
@@ -151,7 +157,7 @@ fn echo(port: &PortArgs, count: u32) -> anyhow::Result<()> {
 fn monitor(port: &PortArgs) -> anyhow::Result<()> {
     let mut serial = open(port)?;
     let mut stdout = io::stdout().lock();
-    let mut buf = [0u8; 256];
+    let mut buf = [0u8; READ_BUF];
     loop {
         let n = read_some(serial.as_mut(), &mut buf)?;
         stdout.write_all(&buf[..n])?;

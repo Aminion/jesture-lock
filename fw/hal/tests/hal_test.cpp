@@ -32,8 +32,7 @@ static_assert(!hal::uart_baud_ok(40'000'000)); // BRR rounds to 0
 // --- I2C timing (compile time) -------------------------------------------------
 
 // RM0444 Rev 6 Table 173 (16 MHz) and Table 172 (8 MHz), standard mode.
-constexpr hal::I2cTiming sm100k_16mhz{
-    .presc = 3, .scldel = 4, .sdadel = 2, .sclh = 0x0F, .scll = 0x13};
+constexpr hal::I2cTiming sm100k_16mhz = hal::i2c_timing_100khz_16mhz;
 constexpr hal::I2cTiming sm10k_16mhz{
     .presc = 3, .scldel = 4, .sdadel = 2, .sclh = 0xC3, .scll = 0xC7};
 constexpr hal::I2cTiming sm100k_8mhz{
@@ -61,7 +60,8 @@ static_assert(!hal::i2c_timing_standard_mode_ok(with(sm100k_16mhz, &hal::I2cTimi
                                                 16'000'000)); // tLOW 4.5 us < 4.7
 static_assert(!hal::i2c_timing_standard_mode_ok(with(sm100k_16mhz, &hal::I2cTiming::sclh, 0x0E),
                                                 16'000'000)); // tHIGH 3.75 us < 4.0
-static_assert(!hal::i2c_timing_standard_mode_ok(with(sm100k_16mhz, &hal::I2cTiming::presc, 16),
+static_assert(!hal::i2c_timing_standard_mode_ok(with(sm100k_16mhz, &hal::I2cTiming::presc,
+                                                     hal::i2c_timing_field4_max + 1),
                                                 16'000'000)); // PRESC is 4 bits
 static_assert(!hal::i2c_timing_standard_mode_ok(sm100k_16mhz, 0));
 
@@ -83,8 +83,9 @@ static_assert(known_who_am_i_values() == 3); // 0x00/0xFF (bus stuck) and the re
 constexpr std::array<std::uint8_t, hal::lsm6ds3_sample_bytes> raw_sample{
     0x01, 0x00, 0xFF, 0xFF, 0x00, 0x80, 0xFF, 0x7F, 0x34, 0x12, 0x11, 0x40};
 constexpr hal::Lsm6ds3Sample decoded = hal::lsm6ds3_decode(raw_sample);
-static_assert(decoded.gyro == std::array<std::int16_t, 3>{1, -1, -32768});
-static_assert(decoded.accel == std::array<std::int16_t, 3>{32767, 0x1234, 16401}); // ~1 g
+static_assert(hal::lsm6ds3_sample_bytes == 12);
+static_assert(decoded.gyro == hal::Lsm6ds3Axes{1, -1, -32768});
+static_assert(decoded.accel == hal::Lsm6ds3Axes{32767, 0x1234, 16401}); // ~1 g
 
 // --- Ring buffer (run time: volatile indices are not constexpr) ------------------
 

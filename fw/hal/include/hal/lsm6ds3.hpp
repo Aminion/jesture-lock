@@ -26,7 +26,11 @@ struct Lsm6ds3Probe {
     std::uint8_t who_am_i;
 };
 
-// Read WHO_AM_I at 0x6B (SA0 high), then 0x6A (SA0 low).
+// 7-bit I2C addresses, chosen by the SA0 pin (the GY module pulls it high).
+inline constexpr std::uint8_t lsm6ds3_addr_sa0_high = 0x6B;
+inline constexpr std::uint8_t lsm6ds3_addr_sa0_low = 0x6A;
+
+// Read WHO_AM_I at the SA0-high address, then at SA0-low.
 // If neither answers, returns the most telling bus error (anything over a plain NACK).
 std::expected<Lsm6ds3Probe, I2cError> lsm6ds3_probe();
 
@@ -46,18 +50,22 @@ constexpr std::optional<Lsm6ds3Chip> lsm6ds3_chip(std::uint8_t who_am_i) {
 
 // One accelerometer + gyroscope reading, raw LSB, axes as printed on the chip.
 // 104 Hz, +-2 g (0.061 mg/LSB, 1 g ~ 16393), +-250 dps (8.75 mdps/LSB).
+using Lsm6ds3Axes = std::array<std::int16_t, 3>; // x, y, z
+
 struct Lsm6ds3Sample {
-    std::array<std::int16_t, 3> gyro;  // x, y, z
-    std::array<std::int16_t, 3> accel; // x, y, z
+    Lsm6ds3Axes gyro;
+    Lsm6ds3Axes accel;
 };
 
 // OUTX_L_G (22h) .. OUTZ_H_XL (2Dh): gyro then accel, each axis little endian (BLE = 0).
 // Same layout on all three known chips.
-inline constexpr std::size_t lsm6ds3_sample_bytes = 12;
+inline constexpr std::size_t lsm6ds3_sample_bytes =
+    2 * std::tuple_size_v<Lsm6ds3Axes> * sizeof(std::int16_t);
 
 constexpr Lsm6ds3Sample lsm6ds3_decode(std::span<const std::uint8_t, lsm6ds3_sample_bytes> raw) {
     const auto axis = [raw](std::size_t i) {
-        return proto::load_le<std::int16_t>(raw.subspan(2 * i).first<2>());
+        return proto::load_le<std::int16_t>(
+            raw.subspan(i * sizeof(std::int16_t)).first<sizeof(std::int16_t)>());
     };
     return {.gyro = {axis(0), axis(1), axis(2)}, .accel = {axis(3), axis(4), axis(5)}};
 }

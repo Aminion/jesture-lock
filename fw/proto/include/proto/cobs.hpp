@@ -14,8 +14,14 @@
 
 namespace proto {
 
+// Data bytes in a full block; its code byte is cobs_max_block + 1 (0xFF).
+inline constexpr std::size_t cobs_max_block = 254;
+inline constexpr std::uint8_t cobs_full_code = cobs_max_block + 1;
+
 // Upper bound on the encoded size of `n` input bytes; size encode buffers with it.
-[[nodiscard]] constexpr std::size_t cobs_max_encoded(std::size_t n) { return n + (n / 254) + 1; }
+[[nodiscard]] constexpr std::size_t cobs_max_encoded(std::size_t n) {
+    return n + (n / cobs_max_block) + 1;
+}
 
 // Bytes written, or nullopt if `out` is smaller than cobs_max_encoded(in.size()).
 [[nodiscard]] constexpr std::optional<std::size_t> cobs_encode(std::span<const std::uint8_t> in,
@@ -30,7 +36,7 @@ namespace proto {
         if (in[i] != 0) {
             out[o++] = in[i];
             ++code;
-            if (code != 0xFF || i + 1 == in.size()) {
+            if (code != cobs_full_code || i + 1 == in.size()) {
                 continue;
             }
         }
@@ -74,7 +80,7 @@ cobs_decode(std::span<const std::uint8_t> in, std::span<std::uint8_t> out) {
             out[o++] = byte;
         }
         // Every block but a full one stands for a zero, except at the very end.
-        if (code != 0xFF && i < in.size()) {
+        if (code != cobs_full_code && i < in.size()) {
             if (o == out.size()) {
                 return std::unexpected(CobsError::overflow);
             }

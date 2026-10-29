@@ -11,6 +11,9 @@ namespace hal {
 inline constexpr std::uint32_t sysclk_hz = 16'000'000;
 inline constexpr std::uint32_t pclk_hz = sysclk_hz;
 
+// Tick rate of micros(): one tick per microsecond.
+inline constexpr std::uint32_t micros_hz = 1'000'000;
+
 // SYSCLK = HSI16 (reset default), SysTick at 1 kHz, TIM2 free-running at 1 MHz.
 void clock_init();
 

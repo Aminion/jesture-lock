@@ -178,17 +178,17 @@ static_assert(frame_encodes_test_vector());
 // Decodes wire bytes that end in the delimiter.
 template <std::size_t N>
 consteval auto frame_decode_wire(const std::array<std::uint8_t, N>& wire,
-                                 std::span<std::uint8_t, proto::max_payload + proto::crc_bytes> out) {
+                                 std::span<std::uint8_t, proto::max_decoded> out) {
     return proto::frame_decode(std::span{wire}.first(N - 1), out);
 }
 template <std::size_t N>
 consteval auto frame_decode_wire(const std::array<std::uint8_t, N>& wire) {
-    std::array<std::uint8_t, proto::max_payload + proto::crc_bytes> out{};
+    std::array<std::uint8_t, proto::max_decoded> out{};
     return frame_decode_wire(wire, out);
 }
 
 consteval bool frame_decodes_test_vector() {
-    std::array<std::uint8_t, proto::max_payload + proto::crc_bytes> out{};
+    std::array<std::uint8_t, proto::max_decoded> out{};
     const auto n = frame_decode_wire(sample_wire, out);
     return n == sample_payload.size() &&
            std::ranges::equal(std::span{out}.first(*n), sample_payload);
@@ -219,7 +219,7 @@ consteval bool frame_limits() {
         return false;
     }
     const auto n = proto::frame_encode(std::span{payload}.first(proto::max_payload), wire);
-    std::array<std::uint8_t, proto::max_payload + proto::crc_bytes> out{};
+    std::array<std::uint8_t, proto::max_decoded> out{};
     if (!n || proto::frame_decode(std::span{wire}.first(*n - 1), out) != proto::max_payload) {
         return false;
     }
@@ -235,11 +235,11 @@ static_assert(frame_limits());
 
 // One byte longer than any valid frame decodes: too_long, not a buffer overrun.
 consteval bool frame_rejects_long() {
-    std::array<std::uint8_t, proto::max_payload + proto::crc_bytes + 1> raw{};
+    std::array<std::uint8_t, proto::max_decoded + 1> raw{};
     raw.fill(0x55);
     std::array<std::uint8_t, proto::cobs_max_encoded(raw.size())> enc{};
     const auto n = proto::cobs_encode(raw, enc);
-    std::array<std::uint8_t, proto::max_payload + proto::crc_bytes> out{};
+    std::array<std::uint8_t, proto::max_decoded> out{};
     return n && proto::frame_decode(std::span{enc}.first(*n), out).error() ==
                     proto::FrameError::too_long;
 }

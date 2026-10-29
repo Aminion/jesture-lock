@@ -12,8 +12,7 @@ namespace {
 
 using hal::pins::imu_int1;
 using hal::pins::imu_int1_port;
-constexpr std::uint32_t line = LL_EXTI_LINE_15; // EXTI line n is pin n of the chosen port
-static_assert(line == imu_int1);
+constexpr std::uint32_t line = hal::pins::imu_int1_exti; // served by EXTI4_15_IRQHandler
 
 // Written only by the interrupt: time first, then count publishes it.
 volatile std::uint32_t g_count = 0;
@@ -43,7 +42,7 @@ void imu_int_init() {
                             .Alternate = 0};
     LL_GPIO_Init(imu_int1_port, &cfg);
 
-    LL_EXTI_SetEXTISource(pins::imu_int1_exti_port, LL_EXTI_CONFIG_LINE15);
+    LL_EXTI_SetEXTISource(pins::imu_int1_exti_port, pins::imu_int1_exti_source);
     LL_EXTI_EnableRisingTrig_0_31(line);
     LL_EXTI_ClearRisingFlag_0_31(line);
     LL_EXTI_EnableIT_0_31(line);

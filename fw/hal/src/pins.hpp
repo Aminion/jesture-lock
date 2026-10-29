@@ -38,5 +38,8 @@ inline GPIO_TypeDef* const imu_int1_port = GPIOA;
 inline constexpr std::uint32_t imu_int1_port_clock = LL_IOP_GRP1_PERIPH_GPIOA;
 inline constexpr std::uint32_t imu_int1 = LL_GPIO_PIN_15;
 inline constexpr std::uint32_t imu_int1_exti_port = LL_EXTI_CONFIG_PORTA;
+inline constexpr std::uint32_t imu_int1_exti_source = LL_EXTI_CONFIG_LINE15;
+inline constexpr std::uint32_t imu_int1_exti = LL_EXTI_LINE_15; // EXTI line n is pin n
+static_assert(imu_int1_exti == imu_int1);
 
 } // namespace hal::pins

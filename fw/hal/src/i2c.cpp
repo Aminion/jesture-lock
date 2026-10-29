@@ -21,18 +21,22 @@ constexpr std::uint32_t sda_pin = hal::pins::i2c_sda;
 // Kernel clock: RCC_CCIPR.I2C1SEL reset value = PCLK.
 constexpr std::uint32_t i2cclk_hz = hal::pclk_hz;
 
-// RM0444 Rev 6 Table 173 (f_I2CCLK = 16 MHz), standard mode 100 kHz.
-constexpr hal::I2cTiming timing_100khz{
-    .presc = 3, .scldel = 4, .sdadel = 2, .sclh = 0x0F, .scll = 0x13};
-static_assert(hal::i2c_timing_standard_mode_ok(timing_100khz, i2cclk_hz));
+constexpr hal::I2cTiming timing = hal::i2c_timing_100khz_16mhz;
+static_assert(i2cclk_hz == 16'000'000, "timing is from the 16 MHz table");
+static_assert(hal::i2c_timing_standard_mode_ok(timing, i2cclk_hz));
 
 // Per flag wait; one byte takes ~0.1 ms at 100 kHz.
 constexpr std::uint32_t timeout_ms = 5;
 
 constexpr std::size_t max_nbytes = 255;
 
-// Half an SCL period at 100 kHz.
-void half_bit_delay() { hal::delay_us(5); }
+// Half an SCL period.
+constexpr std::uint32_t half_bit_us = hal::micros_hz / (2 * hal::i2c_scl_hz);
+static_assert(half_bit_us * 2 * hal::i2c_scl_hz == hal::micros_hz);
+void half_bit_delay() { hal::delay_us(half_bit_us); }
+
+// A slave holding SDA lets go within one byte plus its ACK.
+constexpr int max_clear_pulses = 9;
 
 // Open-drain, no internal pull-ups (they are on the IMU module).
 LL_GPIO_InitTypeDef pin_config(std::uint32_t mode) {
@@ -45,13 +49,13 @@ LL_GPIO_InitTypeDef pin_config(std::uint32_t mode) {
 }
 
 // A reset in the middle of a read can leave the slave holding SDA low, waiting for
-// clocks. Clock SCL until it lets go (at most 9 pulses), then send a STOP.
+// clocks. Clock SCL until it lets go, then send a STOP.
 void bus_clear() {
     LL_GPIO_SetOutputPin(port, scl_pin | sda_pin);
     auto cfg = pin_config(LL_GPIO_MODE_OUTPUT);
     LL_GPIO_Init(port, &cfg);
     half_bit_delay();
-    for (int i = 0; i < 9 && LL_GPIO_IsInputPinSet(port, sda_pin) == 0U; ++i) {
+    for (int i = 0; i < max_clear_pulses && LL_GPIO_IsInputPinSet(port, sda_pin) == 0U; ++i) {
         LL_GPIO_ResetOutputPin(port, scl_pin);
         half_bit_delay();
         LL_GPIO_SetOutputPin(port, scl_pin);
@@ -171,7 +175,7 @@ void i2c_init() {
 
     // TIMINGR and the filters are writable only with PE = 0.
     LL_I2C_Disable(bus);
-    LL_I2C_SetTiming(bus, hal::i2c_timingr(timing_100khz));
+    LL_I2C_SetTiming(bus, hal::i2c_timingr(timing));
     LL_I2C_EnableAnalogFilter(bus);
     LL_I2C_Enable(bus);
 }

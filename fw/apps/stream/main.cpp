@@ -18,11 +18,11 @@
 #include "hal/uart.hpp"
 #include "proto/cobs.hpp"
 #include "proto/crc16.hpp"
+#include "proto/frame.hpp"
 
 namespace {
 
-constexpr std::uint32_t baud = 115'200;
-static_assert(hal::uart_baud_ok(baud));
+static_assert(hal::uart_baud_ok(proto::baud));
 
 // Bring-up: plain-text status and echo lines, replaced by framed messages once the
 // protocol is in. Not part of docs/protocol.md.
@@ -102,7 +102,7 @@ struct Status {
     std::uint32_t count = 0;
 };
 
-void put_axes(Line& line, const std::array<std::int16_t, 3>& v) {
+void put_axes(Line& line, const hal::Lsm6ds3Axes& v) {
     put_int(line, v[0]);
     put(line, ",");
     put_int(line, v[1]);
@@ -111,7 +111,7 @@ void put_axes(Line& line, const std::array<std::int16_t, 3>& v) {
 }
 
 // Nominal time between data-ready edges: 9615 us at 104 Hz.
-constexpr std::uint32_t sample_period_us = 1'000'000 / hal::lsm6ds3_odr_hz;
+constexpr std::uint32_t sample_period_us = hal::micros_hz / hal::lsm6ds3_odr_hz;
 // INT1 high this long with no edge: a sample was not read in time and the latched
 // data-ready blocks all later edges (lsm6ds3.hpp).
 constexpr std::uint32_t stuck_us = 3 * sample_period_us;
@@ -246,7 +246,7 @@ void send_status(Status& status, std::uint32_t now) {
 int main() {
     hal::clock_init();
     hal::led_init();
-    hal::uart_init(baud);
+    hal::uart_init(proto::baud);
     hal::i2c_init();
 
     Status status;
