@@ -3,11 +3,9 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
-#include <cstdio>
 #include <optional>
-#include <print>
-#include <source_location>
 
+#include "gesture_test/check.hpp"
 #include "hal/i2c_timing.hpp"
 #include "hal/lsm6ds3.hpp"
 #include "hal/ring.hpp"
@@ -90,16 +88,8 @@ static_assert(decoded.accel == std::array<std::int16_t, 3>{32767, 0x1234, 16401}
 
 // --- Ring buffer (run time: volatile indices are not constexpr) ------------------
 
-struct Tests {
-    int failed = 0;
-};
-
-void check(Tests& t, bool ok, std::source_location loc = std::source_location::current()) {
-    if (!ok) {
-        std::println(stderr, "{}:{}: check failed", loc.file_name(), loc.line());
-        ++t.failed;
-    }
-}
+using gesture_test::check;
+using gesture_test::Tests;
 
 void ring_empty(Tests& t) {
     hal::Ring<8> r;
@@ -166,9 +156,5 @@ int main() {
     ring_wrap<2>(t);
     ring_wrap<64>(t);
     ring_wrap<256>(t);
-    if (t.failed != 0) {
-        std::println(stderr, "hal_test: {} checks failed", t.failed);
-        return 1;
-    }
-    return 0;
+    return gesture_test::finish(t, "hal_test");
 }

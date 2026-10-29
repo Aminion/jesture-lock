@@ -5,11 +5,9 @@
 #include <concepts>
 #include <cstddef>
 #include <cstdint>
-#include <cstdio>
-#include <print>
-#include <source_location>
 #include <span>
 
+#include "gesture_test/check.hpp"
 #include "proto/cobs.hpp"
 #include "proto/crc16.hpp"
 #include "proto/frame.hpp"
@@ -83,11 +81,10 @@ consteval bool cobs_vector(const std::array<std::uint8_t, N>& raw,
     return d && *d == N && std::ranges::equal(std::span{back}.first(N), raw);
 }
 
-using A0 = std::array<std::uint8_t, 0>;
 template <std::size_t N>
 using A = std::array<std::uint8_t, N>;
 
-static_assert(cobs_vector(A0{}, A<1>{0x01}));
+static_assert(cobs_vector(A<0>{}, A<1>{0x01}));
 static_assert(cobs_vector(A<1>{0x00}, A<2>{0x01, 0x01}));
 static_assert(cobs_vector(A<2>{0x00, 0x00}, A<3>{0x01, 0x01, 0x01}));
 static_assert(cobs_vector(A<3>{0x00, 0x11, 0x00}, A<4>{0x01, 0x02, 0x11, 0x01}));
@@ -138,7 +135,7 @@ static_assert(cobs_decode_into(A<5>{0x05, 0x11, 0x22, 0x33, 0x44}, 3).error() ==
 // The implicit zero between blocks needs room too.
 static_assert(cobs_decode_into(A<4>{0x02, 0x11, 0x02, 0x22}, 1).error() ==
               proto::CobsError::overflow);
-static_assert(cobs_decode_into(A0{}, 0).value() == 0);
+static_assert(cobs_decode_into(A<0>{}, 0).value() == 0);
 
 consteval bool cobs_encode_needs_room() {
     std::array<std::uint8_t, 4> out{};
@@ -178,16 +175,21 @@ consteval bool frame_encodes_test_vector() {
 }
 static_assert(frame_encodes_test_vector());
 
-// Decodes the wire bytes without the delimiter.
+// Decodes wire bytes that end in the delimiter.
+template <std::size_t N>
+consteval auto frame_decode_wire(const std::array<std::uint8_t, N>& wire,
+                                 std::span<std::uint8_t, proto::max_payload + proto::crc_bytes> out) {
+    return proto::frame_decode(std::span{wire}.first(N - 1), out);
+}
 template <std::size_t N>
 consteval auto frame_decode_wire(const std::array<std::uint8_t, N>& wire) {
     std::array<std::uint8_t, proto::max_payload + proto::crc_bytes> out{};
-    return proto::frame_decode(std::span{wire}.first(N - 1), out);
+    return frame_decode_wire(wire, out);
 }
 
 consteval bool frame_decodes_test_vector() {
     std::array<std::uint8_t, proto::max_payload + proto::crc_bytes> out{};
-    const auto n = proto::frame_decode(std::span{sample_wire}.first(sample_wire.size() - 1), out);
+    const auto n = frame_decode_wire(sample_wire, out);
     return n == sample_payload.size() &&
            std::ranges::equal(std::span{out}.first(*n), sample_payload);
 }
@@ -247,16 +249,8 @@ static_assert(frame_decode_wire(A<1>{0x00}).error() == proto::FrameError::too_sh
 
 // --- Run time: sweeps too long for constexpr evaluation ----------------------------
 
-struct Tests {
-    int failed = 0;
-};
-
-void check(Tests& t, bool ok, std::source_location loc = std::source_location::current()) {
-    if (!ok) {
-        std::println(stderr, "{}:{}: check failed", loc.file_name(), loc.line());
-        ++t.failed;
-    }
-}
+using gesture_test::check;
+using gesture_test::Tests;
 
 // Every length 0..600, with no zeros, all zeros, and zeros at block-sized spacing.
 void cobs_round_trips(Tests& t) {
@@ -278,9 +272,5 @@ void cobs_round_trips(Tests& t) {
 int main() {
     Tests t;
     cobs_round_trips(t);
-    if (t.failed != 0) {
-        std::println(stderr, "proto_test: {} checks failed", t.failed);
-        return 1;
-    }
-    return 0;
+    return gesture_test::finish(t, "proto_test");
 }

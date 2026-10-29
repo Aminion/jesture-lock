@@ -34,6 +34,7 @@ Flash one or the other. Results of both paths on the same recording must match b
   baud/I2C timing math, WHO_AM_I map, IMU sample decode) lives in headers, `constexpr` where possible, and is
   tested on the host in `fw/hal/tests/`.
 - `fw/apps/stream/`, `fw/apps/recognize/`: the two firmwares, `main.cpp` only.
+- `test/`: shared helpers for the host test executables (`gesture_test/check.hpp`).
 - `host/`: Rust workspace: `protocol`, `gesture-core` (FFI), `gesture-cli`, `viewer`.
 - `docs/`: `protocol.md` (the C++/Rust contract), `template_format.md`, `pinout.md` (MCU pins and IMU wiring),
   `todo.md` (deferred adjustments),

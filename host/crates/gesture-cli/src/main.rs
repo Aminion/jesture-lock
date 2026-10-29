@@ -1,11 +1,11 @@
 //! gesture-cli: record sessions from fw_stream into `data/`, replay them
 //! through the host build of core/, and compare against fw_recognize events.
 
-use std::io::{self, ErrorKind, Read, Write};
+use std::io::{self, ErrorKind, Write};
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, bail};
-use clap::{Parser, Subcommand};
+use clap::{Args, Parser, Subcommand};
 use serialport::{ClearBuffer, SerialPort};
 
 #[derive(Debug, Parser)]
@@ -19,35 +19,47 @@ struct Cli {
 enum Command {
     /// Print raw bytes from the serial port to stdout (bring-up, plain-text firmware output).
     Monitor {
-        /// Serial device of the ST-LINK virtual COM port.
-        #[arg(long, default_value = "/dev/ttyACM0")]
-        port: String,
-        #[arg(long, default_value_t = 115_200)]
-        baud: u32,
+        #[command(flatten)]
+        port: PortArgs,
     },
     /// Send numbered lines and check that the firmware echoes each one back (bring-up).
     Echo {
-        /// Serial device of the ST-LINK virtual COM port.
-        #[arg(long, default_value = "/dev/ttyACM0")]
-        port: String,
-        #[arg(long, default_value_t = 115_200)]
-        baud: u32,
+        #[command(flatten)]
+        port: PortArgs,
         /// Number of lines to send.
         #[arg(long, default_value_t = 100)]
         count: u32,
     },
 }
 
+#[derive(Debug, Args)]
+struct PortArgs {
+    /// Serial device of the ST-LINK virtual COM port.
+    #[arg(long, default_value = "/dev/ttyACM0")]
+    port: String,
+    #[arg(long, default_value_t = 115_200)]
+    baud: u32,
+}
+
 /// Longest payload the firmware echoes without truncation (72-byte line minus "echo " and CRLF).
 const MAX_ECHO: usize = 64;
 
-fn open(port: &str, baud: u32) -> anyhow::Result<Box<dyn SerialPort>> {
-    serialport::new(port, baud)
+fn open(PortArgs { port, baud }: &PortArgs) -> anyhow::Result<Box<dyn SerialPort>> {
+    serialport::new(port, *baud)
         .timeout(Duration::from_millis(100))
         // Asserting DTR on open resets the MCU through the ST-LINK (seen on this Nucleo).
         .dtr_on_open(false)
         .open()
         .with_context(|| format!("opening {port}"))
+}
+
+/// Reads what is available into `buf`; 0 if nothing came within the port timeout.
+fn read_some(serial: &mut dyn SerialPort, buf: &mut [u8]) -> anyhow::Result<usize> {
+    match serial.read(buf) {
+        Ok(n) => Ok(n),
+        Err(e) if e.kind() == ErrorKind::TimedOut => Ok(0),
+        Err(e) => Err(e).with_context(|| format!("reading {}", serial.name().unwrap_or_default())),
+    }
 }
 
 /// Printable ASCII, cycling through the whole range, `len` bytes, starting at `seed`.
@@ -74,11 +86,8 @@ fn read_line(
             return Ok(None);
         }
         let mut buf = [0u8; 256];
-        match serial.read(&mut buf) {
-            Ok(n) => pending.extend_from_slice(&buf[..n]),
-            Err(e) if e.kind() == ErrorKind::TimedOut => {}
-            Err(e) => return Err(e).context("reading serial port"),
-        }
+        let n = read_some(serial, &mut buf)?;
+        pending.extend_from_slice(&buf[..n]);
     }
 }
 
@@ -88,17 +97,15 @@ fn drain(serial: &mut dyn SerialPort, quiet: Duration) -> anyhow::Result<()> {
     let mut last = Instant::now();
     let mut buf = [0u8; 256];
     while last.elapsed() < quiet {
-        match serial.read(&mut buf) {
-            Ok(_) => last = Instant::now(),
-            Err(e) if e.kind() == ErrorKind::TimedOut => {}
-            Err(e) => return Err(e).context("reading serial port"),
+        if read_some(serial, &mut buf)? > 0 {
+            last = Instant::now();
         }
     }
     Ok(())
 }
 
-fn echo(port: &str, baud: u32, count: u32) -> anyhow::Result<()> {
-    let mut serial = open(port, baud)?;
+fn echo(port: &PortArgs, count: u32) -> anyhow::Result<()> {
+    let mut serial = open(port)?;
     // The ST-LINK keeps a backlog of MCU output from while the port was closed and sends
     // it in a burst on open. Drop input until it goes quiet: status lines are 500 ms apart.
     drain(serial.as_mut(), Duration::from_millis(200))?;
@@ -141,25 +148,20 @@ fn echo(port: &str, baud: u32, count: u32) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn monitor(port: &str, baud: u32) -> anyhow::Result<()> {
-    let mut serial = open(port, baud)?;
+fn monitor(port: &PortArgs) -> anyhow::Result<()> {
+    let mut serial = open(port)?;
     let mut stdout = io::stdout().lock();
     let mut buf = [0u8; 256];
     loop {
-        match serial.read(&mut buf) {
-            Ok(n) => {
-                stdout.write_all(&buf[..n])?;
-                stdout.flush()?;
-            }
-            Err(e) if e.kind() == ErrorKind::TimedOut => {}
-            Err(e) => return Err(e).with_context(|| format!("reading {port}")),
-        }
+        let n = read_some(serial.as_mut(), &mut buf)?;
+        stdout.write_all(&buf[..n])?;
+        stdout.flush()?;
     }
 }
 
 fn main() -> anyhow::Result<()> {
     match Cli::parse().command {
-        Command::Monitor { port, baud } => monitor(&port, baud),
-        Command::Echo { port, baud, count } => echo(&port, baud, count),
+        Command::Monitor { port } => monitor(&port),
+        Command::Echo { port, count } => echo(&port, count),
     }
 }

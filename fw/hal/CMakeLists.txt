@@ -1,5 +1,15 @@
 # Board support: clocks, pins, I2C/UART, LSM6DS3 driver. CMSIS + ST LL, no HAL.
 
+# Public headers alone: their register-free parts (ring buffer, baud/I2C timing math,
+# WHO_AM_I map, IMU sample decode) are tested on the host (fw/hal/tests).
+add_library(gesture_hal_headers INTERFACE)
+target_include_directories(gesture_hal_headers INTERFACE include)
+target_link_libraries(gesture_hal_headers INTERFACE gesture_proto)
+
+if(NOT CMAKE_CROSSCOMPILING)
+    return()
+endif()
+
 foreach(dir CMSIS_CORE_DIR CMSIS_DEVICE_G0_DIR STM32G0_LL_DIR)
     if(NOT ${dir} OR NOT IS_DIRECTORY "${${dir}}")
         message(FATAL_ERROR "${dir} is not set or missing ('${${dir}}'). Run inside `nix develop`.")
@@ -38,8 +48,7 @@ add_library(gesture_hal STATIC
     src/lsm6ds3.cpp
     src/imu_int.cpp
 )
-target_include_directories(gesture_hal PUBLIC include)
-target_link_libraries(gesture_hal PUBLIC stm32g0_vendor gesture_proto)
+target_link_libraries(gesture_hal PUBLIC gesture_hal_headers stm32g0_vendor)
 gesture_target_options(gesture_hal)
 
 set(GESTURE_LINKER_SCRIPT ${CMAKE_CURRENT_SOURCE_DIR}/ld/stm32g031k8.ld
