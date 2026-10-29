@@ -24,6 +24,9 @@ constexpr std::uint32_t i2cclk_hz = hal::pclk_hz;
 constexpr hal::I2cTiming timing = hal::i2c_timing_100khz_16mhz;
 static_assert(i2cclk_hz == 16'000'000, "timing is from the 16 MHz table");
 static_assert(hal::i2c_timing_standard_mode_ok(timing, i2cclk_hz));
+constexpr std::uint32_t timingr = __LL_I2C_CONVERT_TIMINGS(timing.presc, timing.scldel,
+                                                           timing.sdadel, timing.sclh, timing.scll);
+static_assert(timingr == 0x3042'0F13, "RM0444 Rev 6 Table 173");
 
 // Per flag wait; one byte takes ~0.1 ms at 100 kHz.
 constexpr std::uint32_t timeout_ms = 5;
@@ -175,7 +178,7 @@ void i2c_init() {
 
     // TIMINGR and the filters are writable only with PE = 0.
     LL_I2C_Disable(bus);
-    LL_I2C_SetTiming(bus, hal::i2c_timingr(timing));
+    LL_I2C_SetTiming(bus, timingr);
     LL_I2C_EnableAnalogFilter(bus);
     LL_I2C_Enable(bus);
 }

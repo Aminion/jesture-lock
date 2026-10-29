@@ -1,9 +1,11 @@
 // Host tests for the register-free parts of fw/hal. Returns non-zero on failure (ctest).
 // Only headers are used: the drivers themselves need the MCU and are checked on hardware.
+#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <cstdint>
 #include <optional>
+#include <ranges>
 
 #include "gesture_test/check.hpp"
 #include "hal/i2c_timing.hpp"
@@ -38,8 +40,6 @@ constexpr hal::I2cTiming sm10k_16mhz{
 constexpr hal::I2cTiming sm100k_8mhz{
     .presc = 1, .scldel = 4, .sdadel = 2, .sclh = 0x0F, .scll = 0x13};
 
-static_assert(hal::i2c_timingr(sm100k_16mhz) == 0x3042'0F13);
-static_assert(hal::i2c_timingr(sm10k_16mhz) == 0x3042'C3C7);
 static_assert(hal::i2c_timing_standard_mode_ok(sm100k_16mhz, 16'000'000));
 static_assert(hal::i2c_timing_standard_mode_ok(sm10k_16mhz, 16'000'000));
 static_assert(hal::i2c_timing_standard_mode_ok(sm100k_8mhz, 8'000'000));
@@ -70,14 +70,9 @@ static_assert(!hal::i2c_timing_standard_mode_ok(sm100k_16mhz, 0));
 static_assert(hal::lsm6ds3_chip(0x69) == hal::Lsm6ds3Chip::lsm6ds3);
 static_assert(hal::lsm6ds3_chip(0x6A) == hal::Lsm6ds3Chip::lsm6ds3trc);
 static_assert(hal::lsm6ds3_chip(0x6C) == hal::Lsm6ds3Chip::lsm6dso);
-consteval int known_who_am_i_values() {
-    int n = 0;
-    for (int v = 0; v <= 0xFF; ++v) {
-        n += hal::lsm6ds3_chip(static_cast<std::uint8_t>(v)).has_value() ? 1 : 0;
-    }
-    return n;
-}
-static_assert(known_who_am_i_values() == 3); // 0x00/0xFF (bus stuck) and the rest: unknown
+static_assert(std::ranges::count_if(std::views::iota(0, 0x100), [](int v) {
+                  return hal::lsm6ds3_chip(static_cast<std::uint8_t>(v)).has_value();
+              }) == 3); // 0x00/0xFF (bus stuck) and the rest: unknown
 
 // Little endian per axis, gyro x, y, z then accel x, y, z; full int16 range.
 constexpr std::array<std::uint8_t, hal::lsm6ds3_sample_bytes> raw_sample{

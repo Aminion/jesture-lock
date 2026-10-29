@@ -19,11 +19,6 @@ struct I2cTiming {
 // Largest value of a 4-bit TIMINGR field.
 inline constexpr std::uint8_t i2c_timing_field4_max = 0xF;
 
-constexpr std::uint32_t i2c_timingr(I2cTiming t) {
-    return (std::uint32_t{t.presc} << 28U) | (std::uint32_t{t.scldel} << 20U) |
-           (std::uint32_t{t.sdadel} << 16U) | (std::uint32_t{t.sclh} << 8U) | t.scll;
-}
-
 // Standard mode (100 kHz) with the analog filter on and no digital filter (DNF = 0).
 // Conditions from RM0444 "I2C timings" (SCLDEL, SDADEL), bus limits from RM0444 Table 169
 // and the tLOW/tHIGH table, tAF from DS12992. tLOW/tHIGH are checked on tSCLL/tSCLH alone,

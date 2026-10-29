@@ -6,6 +6,7 @@
 // Canonical encoding: a run of 254 non-zero bytes that ends the input gets no extra empty
 // block, so the output is at most n + ceil(n / 254) bytes (1 for empty input).
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <expected>
@@ -72,13 +73,13 @@ cobs_decode(std::span<const std::uint8_t> in, std::span<std::uint8_t> out) {
         if (len > out.size() - o) {
             return std::unexpected(CobsError::overflow);
         }
-        for (std::size_t k = 0; k < len; ++k) {
-            const std::uint8_t byte = in[i++];
-            if (byte == 0) {
-                return std::unexpected(CobsError::zero_byte);
-            }
-            out[o++] = byte;
+        const auto block = in.subspan(i, len);
+        if (std::ranges::contains(block, 0)) {
+            return std::unexpected(CobsError::zero_byte);
         }
+        std::ranges::copy(block, out.subspan(o).begin());
+        i += len;
+        o += len;
         // Every block but a full one stands for a zero, except at the very end.
         if (code != cobs_full_code && i < in.size()) {
             if (o == out.size()) {
