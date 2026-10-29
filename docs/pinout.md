@@ -12,7 +12,7 @@ Keep this file in sync with the code: change a pin there, change it here in the 
 | GND     | CN4-2         | GND     | -    | ground               | wired   |
 | SCL     | CN3-8         | D5      | PA9  | I2C1_SCL, AF6        | in use  |
 | SDA     | CN3-7         | D4      | PA10 | I2C1_SDA, AF6        | in use  |
-| INT1    | CN3-5         | D2      | PA15 | EXTI15, data ready   | wired, not used in code yet |
+| INT1    | CN3-5         | D2      | PA15 | EXTI15 rising, gyro data ready; input, pull-down | in use  |
 | INT2    | CN3-6         | D3      | PB1  | EXTI1, spare (e.g. wake on motion) | not wired, pin reserved |
 | CS      | -             | -       | -    | high on module: I2C mode         | |
 | SDO/SA0 | -             | -       | -    | high on module: address 0x6B     | |

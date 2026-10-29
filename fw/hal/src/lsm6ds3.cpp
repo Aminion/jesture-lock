@@ -6,6 +6,7 @@
 namespace {
 
 // Same addresses and the bits used here on LSM6DS3 (DocID026899) and LSM6DS3TR-C.
+constexpr std::uint8_t reg_int1_ctrl = 0x0D;
 constexpr std::uint8_t reg_who_am_i = 0x0F;
 constexpr std::uint8_t reg_ctrl1_xl = 0x10;
 constexpr std::uint8_t reg_ctrl3_c = 0x12;
@@ -17,6 +18,8 @@ constexpr std::uint8_t fs_xl_2g = 0b00 << 2U;
 constexpr std::uint8_t fs_g_250dps = 0b00 << 2U;
 constexpr std::uint8_t ctrl3_bdu = 1U << 6U;
 constexpr std::uint8_t ctrl3_if_inc = 1U << 2U;
+// With equal ODRs DRDY_G comes after DRDY_XL, so it means both are ready (AN4650 3.1).
+constexpr std::uint8_t int1_drdy_g = 1U << 1U;
 constexpr std::uint8_t status_xlda = 1U << 0U;
 constexpr std::uint8_t status_gda = 1U << 1U;
 
@@ -48,6 +51,11 @@ std::expected<void, I2cError> lsm6ds3_init(std::uint8_t addr) {
         return r;
     }
     // CTRL1_XL, CTRL2_G. Accel anti-aliasing bandwidth follows the ODR (XL_BW_SCAL_ODR = 0).
+    // INT1 push-pull, active high (CTRL3_C PP_OD = H_LACTIVE = 0).
+    const std::uint8_t int1 = int1_drdy_g;
+    if (auto r = i2c_write_regs(addr, reg_int1_ctrl, std::span(&int1, 1)); !r) {
+        return r;
+    }
     const std::array<std::uint8_t, 2> ctrl{odr_104hz | fs_xl_2g, odr_104hz | fs_g_250dps};
     return i2c_write_regs(addr, reg_ctrl1_xl, ctrl);
 }

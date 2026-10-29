@@ -61,8 +61,11 @@ constexpr Lsm6ds3Sample lsm6ds3_decode(std::span<const std::uint8_t, lsm6ds3_sam
     return {.gyro = {axis(0), axis(1), axis(2)}, .accel = {axis(3), axis(4), axis(5)}};
 }
 
-// Both sensors at 104 Hz, +-2 g, +-250 dps, block data update on. Registers outside
-// CTRL1_XL..CTRL3_C keep their values across an MCU reset (only a power cycle clears them).
+// Both sensors at 104 Hz, +-2 g, +-250 dps, block data update on, gyro data ready on INT1.
+// INT1 is level, not a pulse (AN4650 3.3): it goes high with a new sample and low when the
+// sample is read; an unread sample keeps it high and later samples give no new edge.
+// Registers outside INT1_CTRL and CTRL1_XL..CTRL3_C keep their values across an MCU reset
+// (only a power cycle clears them).
 std::expected<void, I2cError> lsm6ds3_init(std::uint8_t addr);
 
 // Latest sample if both sensors have new data since the last read (STATUS_REG), else nullopt.

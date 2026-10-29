@@ -3,7 +3,9 @@
 #include <array>
 #include <charconv>
 #include <cstdint>
+#include <limits>
 #include <memory>
+#include <optional>
 #include <span>
 #include <string_view>
 #include <utility>
@@ -11,6 +13,7 @@
 #include "hal/clock.hpp"
 #include "hal/gpio.hpp"
 #include "hal/i2c.hpp"
+#include "hal/imu_int.hpp"
 #include "hal/lsm6ds3.hpp"
 #include "hal/uart.hpp"
 #include "proto/cobs.hpp"
@@ -107,25 +110,106 @@ void put_axes(Line& line, const std::array<std::int16_t, 3>& v) {
     put_int(line, v[2]);
 }
 
-// Bring-up: "imu a=x,y,z g=x,y,z" in raw LSB, "imu stale" if no new sample since the
-// last line, "imu i2c_err=N" if the read failed.
-void send_sample(std::uint8_t addr) {
+// IMU ODR 104 Hz: nominal time between data-ready edges.
+constexpr std::uint32_t sample_period_us = 9'615;
+// INT1 high this long with no edge: a sample was not read in time and the latched
+// data-ready blocks all later edges (lsm6ds3.hpp).
+constexpr std::uint32_t stuck_us = 3 * sample_period_us;
+
+// Bring-up check of the sample timing. n, dt and lat cover one "drdy" line; missed,
+// stuck and i2c_err count since reset.
+struct Timing {
+    std::uint32_t seen = 0; // hal::ImuEdge::count already handled
+    std::uint32_t last_us = 0;
+    bool have_last = false; // last_us is a real edge, so the next dt is valid
+    std::uint32_t n = 0;
+    std::uint32_t dt_min = std::numeric_limits<std::uint32_t>::max();
+    std::uint32_t dt_max = 0;
+    std::uint32_t lat_max = 0; // edge -> sample read
+    std::uint32_t missed = 0;  // from dt: samples the IMU made that we never read
+    std::uint32_t stuck = 0;
+    std::uint32_t i2c_err = 0;
+};
+
+struct Imu {
+    std::uint8_t addr = 0;
+    Timing timing;
+    std::optional<hal::Lsm6ds3Sample> latest;
+};
+
+void read_sample(Imu& imu) {
+    const auto sample = hal::lsm6ds3_read(imu.addr);
+    if (!sample) {
+        ++imu.timing.i2c_err;
+    } else if (*sample) {
+        imu.latest = *sample;
+    }
+}
+
+void poll_imu(Imu& imu) {
+    Timing& t = imu.timing;
+    const hal::ImuEdge edge = hal::imu_int_last();
+    if (edge.count != t.seen) {
+        t.seen = edge.count;
+        read_sample(imu);
+        t.lat_max = std::max(t.lat_max, hal::micros() - edge.time_us);
+        if (t.have_last) {
+            const std::uint32_t dt = edge.time_us - t.last_us;
+            t.dt_min = std::min(t.dt_min, dt);
+            t.dt_max = std::max(t.dt_max, dt);
+            const std::uint32_t periods = (dt + (sample_period_us / 2)) / sample_period_us;
+            t.missed += periods > 1 ? periods - 1 : 0;
+        }
+        t.last_us = edge.time_us;
+        t.have_last = true;
+        ++t.n;
+    } else if (hal::imu_int_high() && hal::micros() - t.last_us > stuck_us) {
+        read_sample(imu); // releases INT1; the gap length is unknown, so no dt
+        t.last_us = hal::micros();
+        t.have_last = false;
+        ++t.stuck;
+    }
+}
+
+// Bring-up: "imu a=x,y,z g=x,y,z" in raw LSB, the latest sample read.
+void send_sample(const Imu& imu) {
     Line line;
     put(line, "imu ");
-    const auto sample = hal::lsm6ds3_read(addr);
-    if (!sample) {
-        put(line, "i2c_err=");
-        put_uint(line, std::to_underlying(sample.error()));
-    } else if (!sample->has_value()) {
-        put(line, "stale");
-    } else {
+    if (imu.latest) {
         put(line, "a=");
-        put_axes(line, (*sample)->accel);
+        put_axes(line, imu.latest->accel);
         put(line, " g=");
-        put_axes(line, (*sample)->gyro);
+        put_axes(line, imu.latest->gyro);
+    } else {
+        put(line, "none");
     }
     put(line, "\r\n");
     send(line);
+}
+
+// Bring-up: "drdy n=52 dt=9600..9630 lat=1900 miss=0 stuck=0 i2c_err=0", times in us.
+void send_timing(Timing& t) {
+    Line line;
+    put(line, "drdy n=");
+    put_uint(line, t.n);
+    put(line, " dt=");
+    put_uint(line, t.n > 1 ? t.dt_min : 0);
+    put(line, "..");
+    put_uint(line, t.dt_max);
+    put(line, " lat=");
+    put_uint(line, t.lat_max);
+    put(line, " miss=");
+    put_uint(line, t.missed);
+    put(line, " stuck=");
+    put_uint(line, t.stuck);
+    put(line, " i2c_err=");
+    put_uint(line, t.i2c_err);
+    put(line, "\r\n");
+    send(line);
+    t.n = 0;
+    t.dt_min = std::numeric_limits<std::uint32_t>::max();
+    t.dt_max = 0;
+    t.lat_max = 0;
 }
 
 void send_status(Status& status, std::uint32_t now) {
@@ -180,31 +264,59 @@ int main() {
         status.i2c_err = std::to_underlying(probe.error());
     }
 
-    // Bring-up: a sample line every tick (8 Hz), a status line every 4th.
+    Imu imu;
+    imu.addr = status.imu_addr;
+    if (status.imu_ok) {
+        hal::imu_int_init();
+        // INT1 may still be high from before the MCU reset (the IMU kept running with an
+        // unread sample). Read once so the next sample gives an edge.
+        read_sample(imu);
+    }
+
+    // Bring-up: a sample line every tick (8 Hz); status and timing lines every 4th.
+    // At most one line per loop pass: a line takes up to ~8 ms at 115200 baud, two in a
+    // row would outlast the 9.6 ms sample period and lose a sample.
     constexpr std::uint32_t tick_ms = 125;
     constexpr std::uint32_t ticks_per_status = 4;
     Echo echo;
     std::uint32_t last_tick = hal::millis();
     std::uint32_t ticks = 0;
+    bool sample_due = false;
+    bool status_due = false;
+    bool timing_due = false;
     for (;;) {
-        // TODO: read every sample, timestamp, frame, send.
-        echo_input(echo);
+        // TODO: send every sample, framed.
+        if (status.imu_ok) {
+            poll_imu(imu);
+        }
 
         const std::uint32_t now = hal::millis();
-        if (now - last_tick < tick_ms) {
-            continue;
+        if (now - last_tick >= tick_ms) {
+            last_tick += tick_ms; // no drift from late ticks
+            ++ticks;
+            sample_due = status.imu_ok;
+            // Slow blink (toggle at 2 Hz) = IMU running, fast (8 Hz) = no IMU, unknown or
+            // failed.
+            if (!status.imu_ok || ticks % ticks_per_status == 0) {
+                hal::led_toggle();
+            }
+            if (ticks % ticks_per_status == 0) {
+                status_due = true;
+                timing_due = status.imu_ok;
+            }
         }
-        last_tick += tick_ms; // no drift from late ticks
-        ++ticks;
-        if (status.imu_ok) {
-            send_sample(status.imu_addr);
-        }
-        // Slow blink (toggle at 2 Hz) = IMU running, fast (8 Hz) = no IMU, unknown or failed.
-        if (!status.imu_ok || ticks % ticks_per_status == 0) {
-            hal::led_toggle();
-        }
-        if (ticks % ticks_per_status == 0) {
+
+        if (sample_due) {
+            sample_due = false;
+            send_sample(imu);
+        } else if (status_due) {
+            status_due = false;
             send_status(status, now);
+        } else if (timing_due) {
+            timing_due = false;
+            send_timing(imu.timing);
+        } else {
+            echo_input(echo);
         }
     }
 }

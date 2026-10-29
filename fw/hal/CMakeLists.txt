@@ -36,6 +36,7 @@ add_library(gesture_hal STATIC
     src/i2c.cpp
     src/uart.cpp
     src/lsm6ds3.cpp
+    src/imu_int.cpp
 )
 target_include_directories(gesture_hal PUBLIC include)
 target_link_libraries(gesture_hal PUBLIC stm32g0_vendor)
