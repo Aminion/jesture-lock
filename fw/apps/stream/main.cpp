@@ -19,6 +19,7 @@
 namespace {
 
 constexpr std::uint32_t baud = 115'200;
+static_assert(hal::uart_baud_ok(baud));
 
 // Bring-up: plain-text status and echo lines, replaced by framed messages once the
 // protocol is in. Not part of docs/protocol.md.

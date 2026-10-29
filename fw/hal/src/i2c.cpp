@@ -3,6 +3,7 @@
 #include <initializer_list>
 
 #include "hal/clock.hpp"
+#include "hal/i2c_timing.hpp"
 #include "stm32g0xx_ll_bus.h"
 #include "stm32g0xx_ll_gpio.h"
 #include "stm32g0xx_ll_i2c.h"
@@ -21,9 +22,13 @@ GPIO_TypeDef* const port = GPIOA;
 constexpr std::uint32_t scl_pin = LL_GPIO_PIN_9;
 constexpr std::uint32_t sda_pin = LL_GPIO_PIN_10;
 
-// RM0444 Rev 6 Table 173 (f_I2CCLK = 16 MHz), standard mode 100 kHz:
-// PRESC=3, SCLDEL=4, SDADEL=2, SCLH=0x0F, SCLL=0x13.
-constexpr std::uint32_t timing_100khz = 0x3042'0F13;
+// Kernel clock: RCC_CCIPR.I2C1SEL reset value = PCLK.
+constexpr std::uint32_t i2cclk_hz = 16'000'000;
+
+// RM0444 Rev 6 Table 173 (f_I2CCLK = 16 MHz), standard mode 100 kHz.
+constexpr hal::I2cTiming timing_100khz{
+    .presc = 3, .scldel = 4, .sdadel = 2, .sclh = 0x0F, .scll = 0x13};
+static_assert(hal::i2c_timing_standard_mode_ok(timing_100khz, i2cclk_hz));
 
 // Per flag wait; one byte takes ~0.1 ms at 100 kHz.
 constexpr std::uint32_t timeout_ms = 5;
@@ -151,7 +156,6 @@ namespace hal {
 
 void i2c_init() {
     LL_IOP_GRP1_EnableClock(LL_IOP_GRP1_PERIPH_GPIOA);
-    // Kernel clock: RCC_CCIPR.I2C1SEL reset value = PCLK.
     LL_APB1_GRP1_EnableClock(LL_APB1_GRP1_PERIPH_I2C1);
 
     bus_clear();
@@ -165,7 +169,7 @@ void i2c_init() {
 
     // TIMINGR and the filters are writable only with PE = 0.
     LL_I2C_Disable(bus);
-    LL_I2C_SetTiming(bus, timing_100khz);
+    LL_I2C_SetTiming(bus, hal::i2c_timingr(timing_100khz));
     LL_I2C_EnableAnalogFilter(bus);
     LL_I2C_Enable(bus);
 }

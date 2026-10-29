@@ -28,17 +28,4 @@ std::expected<Lsm6ds3Probe, I2cError> lsm6ds3_probe() {
     return std::unexpected(error);
 }
 
-std::optional<Lsm6ds3Chip> lsm6ds3_chip(std::uint8_t who_am_i) {
-    switch (who_am_i) {
-    case 0x69:
-        return Lsm6ds3Chip::lsm6ds3;
-    case 0x6A:
-        return Lsm6ds3Chip::lsm6ds3trc;
-    case 0x6C:
-        return Lsm6ds3Chip::lsm6dso;
-    default:
-        return std::nullopt;
-    }
-}
-
 } // namespace hal
