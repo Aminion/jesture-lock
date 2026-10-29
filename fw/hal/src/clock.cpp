@@ -6,14 +6,14 @@
 
 namespace {
 
-constexpr std::uint32_t sysclk_hz = 16'000'000;
+using hal::sysclk_hz;
 constexpr std::uint32_t systick_hz = 1000;
 static_assert(sysclk_hz % systick_hz == 0, "SysTick period is not a whole number of cycles");
 static_assert((sysclk_hz / systick_hz) - 1 <= SysTick_LOAD_RELOAD_Msk, "SysTick LOAD is 24 bits");
 
 // TIM2 is the only 32-bit timer on G031 (DS12992). APB prescaler 1, so TIMPCLK = PCLK
 // (RM0444 RCC, timer clock); CK_CNT = TIMPCLK / (PSC + 1) (RM0444 TIMx_PSC).
-constexpr std::uint32_t timpclk_hz = sysclk_hz;
+constexpr std::uint32_t timpclk_hz = hal::pclk_hz;
 constexpr std::uint32_t micros_hz = 1'000'000;
 static_assert(timpclk_hz % micros_hz == 0 && (timpclk_hz / micros_hz) - 1 <= 0xFFFF,
               "PSC is 16 bits");

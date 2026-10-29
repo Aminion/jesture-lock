@@ -9,10 +9,12 @@
 #include <optional>
 #include <span>
 
+#include "hal/clock.hpp"
+
 namespace hal {
 
 // RCC_CCIPR.USART2SEL is reserved on G031 (RM0444 5.4.21 note 1): the kernel clock is PCLK.
-inline constexpr std::uint32_t uart_clock_hz = 16'000'000;
+inline constexpr std::uint32_t uart_clock_hz = pclk_hz;
 
 // Oversampling by 16: BRR = USARTDIV = f_ck / baud, rounded to nearest (RM0444 33.5.7).
 constexpr std::uint32_t uart_brr(std::uint32_t baud) { return (uart_clock_hz + baud / 2) / baud; }

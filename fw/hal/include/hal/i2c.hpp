@@ -10,8 +10,9 @@
 
 namespace hal {
 
+// From 1, so 0 can stand for "no error" where the code is stored as a number.
 enum class I2cError : std::uint8_t {
-    nack,      // address or byte not acknowledged: no device, wrong address
+    nack = 1,  // address or byte not acknowledged: no device, wrong address
     bus_error, // misplaced START/STOP (BERR) or arbitration lost (ARLO)
     timeout,   // flag never came: SCL held low, missing pull-ups
     too_long,  // over the 255-byte NBYTES limit (RELOAD is not supported)

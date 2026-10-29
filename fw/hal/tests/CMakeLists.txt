@@ -4,6 +4,7 @@ add_executable(hal_test
     hal_test.cpp
 )
 target_include_directories(hal_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../include)
+target_link_libraries(hal_test PRIVATE gesture_proto) # proto/le.hpp
 gesture_target_options(hal_test)
 
 add_test(NAME hal_test COMMAND hal_test)

@@ -23,6 +23,9 @@ constexpr std::uint8_t int1_drdy_g = 1U << 1U;
 constexpr std::uint8_t status_xlda = 1U << 0U;
 constexpr std::uint8_t status_gda = 1U << 1U;
 
+static_assert(hal::lsm6ds3_ctrl1_xl == (odr_104hz | fs_xl_2g));
+static_assert(hal::lsm6ds3_ctrl2_g == (odr_104hz | fs_g_250dps));
+
 constexpr std::array<std::uint8_t, 2> addresses{0x6B, 0x6A};
 
 } // namespace
@@ -56,7 +59,7 @@ std::expected<void, I2cError> lsm6ds3_init(std::uint8_t addr) {
     if (auto r = i2c_write_regs(addr, reg_int1_ctrl, std::span(&int1, 1)); !r) {
         return r;
     }
-    const std::array<std::uint8_t, 2> ctrl{odr_104hz | fs_xl_2g, odr_104hz | fs_g_250dps};
+    const std::array<std::uint8_t, 2> ctrl{lsm6ds3_ctrl1_xl, lsm6ds3_ctrl2_g};
     return i2c_write_regs(addr, reg_ctrl1_xl, ctrl);
 }
 

@@ -110,8 +110,8 @@ void put_axes(Line& line, const std::array<std::int16_t, 3>& v) {
     put_int(line, v[2]);
 }
 
-// IMU ODR 104 Hz: nominal time between data-ready edges.
-constexpr std::uint32_t sample_period_us = 9'615;
+// Nominal time between data-ready edges: 9615 us at 104 Hz.
+constexpr std::uint32_t sample_period_us = 1'000'000 / hal::lsm6ds3_odr_hz;
 // INT1 high this long with no edge: a sample was not read in time and the latched
 // data-ready blocks all later edges (lsm6ds3.hpp).
 constexpr std::uint32_t stuck_us = 3 * sample_period_us;

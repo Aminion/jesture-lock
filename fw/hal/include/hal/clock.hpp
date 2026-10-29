@@ -6,6 +6,11 @@
 
 namespace hal {
 
+// HSI16 (reset default), AHB and APB prescalers 1: every peripheral clock below is 16 MHz.
+// Derive clock-dependent constants from these, not from a literal.
+inline constexpr std::uint32_t sysclk_hz = 16'000'000;
+inline constexpr std::uint32_t pclk_hz = sysclk_hz;
+
 // SYSCLK = HSI16 (reset default), SysTick at 1 kHz, TIM2 free-running at 1 MHz.
 void clock_init();
 

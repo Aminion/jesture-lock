@@ -23,7 +23,7 @@ constexpr std::uint32_t scl_pin = LL_GPIO_PIN_9;
 constexpr std::uint32_t sda_pin = LL_GPIO_PIN_10;
 
 // Kernel clock: RCC_CCIPR.I2C1SEL reset value = PCLK.
-constexpr std::uint32_t i2cclk_hz = 16'000'000;
+constexpr std::uint32_t i2cclk_hz = hal::pclk_hz;
 
 // RM0444 Rev 6 Table 173 (f_I2CCLK = 16 MHz), standard mode 100 kHz.
 constexpr hal::I2cTiming timing_100khz{

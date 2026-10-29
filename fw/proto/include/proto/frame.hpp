@@ -12,6 +12,7 @@
 
 #include "proto/cobs.hpp"
 #include "proto/crc16.hpp"
+#include "proto/le.hpp"
 
 namespace proto {
 
@@ -32,9 +33,7 @@ inline constexpr std::size_t max_frame = cobs_max_encoded(max_payload + crc_byte
     }
     std::array<std::uint8_t, max_payload + crc_bytes> raw{};
     std::ranges::copy(payload, raw.begin());
-    const std::uint16_t crc = crc16(payload);
-    raw[payload.size()] = static_cast<std::uint8_t>(crc & 0xFFU); // low byte first
-    raw[payload.size() + 1] = static_cast<std::uint8_t>(crc >> 8U);
+    store_le(std::span{raw}.subspan(payload.size()).first<crc_bytes>(), crc16(payload));
     const auto encoded = cobs_encode(std::span{raw}.first(payload.size() + crc_bytes), out);
     if (!encoded) {
         return std::nullopt; // cannot happen: out holds max_frame
@@ -50,12 +49,12 @@ enum class FrameError : std::uint8_t {
     crc,       // CRC mismatch
 };
 
-// Decodes one frame, given without its 0x00 delimiter, into `out` (at least
-// max_payload + crc_bytes long). Returns the payload length; the payload starts at out[0].
+// Decodes one frame, given without its 0x00 delimiter, into `out`. Returns the payload
+// length; the payload starts at out[0], its CRC follows it. On error `out` holds garbage.
 [[nodiscard]] constexpr std::expected<std::size_t, FrameError>
-frame_decode(std::span<const std::uint8_t> encoded, std::span<std::uint8_t> out) {
-    std::array<std::uint8_t, max_payload + crc_bytes> raw{};
-    const auto decoded = cobs_decode(encoded, raw);
+frame_decode(std::span<const std::uint8_t> encoded,
+             std::span<std::uint8_t, max_payload + crc_bytes> out) {
+    const auto decoded = cobs_decode(encoded, out);
     if (!decoded) {
         return std::unexpected(decoded.error() == CobsError::overflow ? FrameError::too_long
                                                                       : FrameError::cobs);
@@ -63,15 +62,10 @@ frame_decode(std::span<const std::uint8_t> encoded, std::span<std::uint8_t> out)
     if (*decoded < header_bytes + crc_bytes) {
         return std::unexpected(FrameError::too_short);
     }
-    if (out.size() < *decoded) {
-        return std::unexpected(FrameError::too_long);
-    }
     const std::size_t len = *decoded - crc_bytes;
-    const auto crc = static_cast<std::uint16_t>(raw[len] | (raw[len + 1] << 8U));
-    if (crc16(std::span{raw}.first(len)) != crc) {
+    if (crc16(out.first(len)) != load_le<std::uint16_t>(out.subspan(len).first<crc_bytes>())) {
         return std::unexpected(FrameError::crc);
     }
-    std::ranges::copy(std::span{raw}.first(len), out.begin());
     return len;
 }
 

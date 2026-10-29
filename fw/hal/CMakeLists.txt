@@ -39,7 +39,7 @@ add_library(gesture_hal STATIC
     src/imu_int.cpp
 )
 target_include_directories(gesture_hal PUBLIC include)
-target_link_libraries(gesture_hal PUBLIC stm32g0_vendor)
+target_link_libraries(gesture_hal PUBLIC stm32g0_vendor gesture_proto)
 gesture_target_options(gesture_hal)
 
 set(GESTURE_LINKER_SCRIPT ${CMAKE_CURRENT_SOURCE_DIR}/ld/stm32g031k8.ld

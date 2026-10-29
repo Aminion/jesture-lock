@@ -10,6 +10,7 @@
 #include <span>
 
 #include "hal/i2c.hpp"
+#include "proto/le.hpp"
 
 namespace hal {
 
@@ -56,10 +57,15 @@ inline constexpr std::size_t lsm6ds3_sample_bytes = 12;
 
 constexpr Lsm6ds3Sample lsm6ds3_decode(std::span<const std::uint8_t, lsm6ds3_sample_bytes> raw) {
     const auto axis = [raw](std::size_t i) {
-        return static_cast<std::int16_t>(raw[2 * i] | (raw[(2 * i) + 1] << 8U));
+        return proto::load_le<std::int16_t>(raw.subspan(2 * i).first<2>());
     };
     return {.gyro = {axis(0), axis(1), axis(2)}, .accel = {axis(3), axis(4), axis(5)}};
 }
+
+// What lsm6ds3_init() configures; Hello reports the two registers (docs/protocol.md).
+inline constexpr std::uint32_t lsm6ds3_odr_hz = 104;
+inline constexpr std::uint8_t lsm6ds3_ctrl1_xl = 0x40; // ODR_XL 104 Hz, FS_XL +-2 g
+inline constexpr std::uint8_t lsm6ds3_ctrl2_g = 0x40;  // ODR_G 104 Hz, FS_G +-250 dps
 
 // Both sensors at 104 Hz, +-2 g, +-250 dps, block data update on, gyro data ready on INT1.
 // INT1 is level, not a pulse (AN4650 3.3): it goes high with a new sample and low when the

@@ -2,6 +2,7 @@
 // most checks are static_asserts; only sweeps too long for constexpr evaluation run.
 #include <algorithm>
 #include <array>
+#include <concepts>
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
@@ -12,6 +13,7 @@
 #include "proto/cobs.hpp"
 #include "proto/crc16.hpp"
 #include "proto/frame.hpp"
+#include "proto/le.hpp"
 
 namespace {
 
@@ -45,6 +47,25 @@ static_assert(proto::crc16(Bytes{check_string}.subspan(4),
 // init 0xFFFF: leading zeros change the result.
 static_assert(proto::crc16(std::array<std::uint8_t, 1>{0}) !=
               proto::crc16(std::array<std::uint8_t, 2>{0, 0}));
+
+// --- Little endian ----------------------------------------------------------------
+
+template <std::integral T>
+consteval std::array<std::uint8_t, sizeof(T)> le_bytes(T v) {
+    std::array<std::uint8_t, sizeof(T)> a{};
+    proto::store_le(std::span{a}, v);
+    return a;
+}
+static_assert(le_bytes(std::uint16_t{0x1234}) == std::array<std::uint8_t, 2>{0x34, 0x12});
+static_assert(le_bytes(std::uint32_t{0x12345678}) ==
+              std::array<std::uint8_t, 4>{0x78, 0x56, 0x34, 0x12});
+static_assert(le_bytes(std::int16_t{-2}) == std::array<std::uint8_t, 2>{0xFE, 0xFF});
+static_assert(le_bytes(std::uint8_t{0xAB}) == std::array<std::uint8_t, 1>{0xAB});
+static_assert(proto::load_le<std::int16_t>(std::array<std::uint8_t, 2>{0x00, 0x80}) == -32768);
+static_assert(proto::load_le<std::int16_t>(std::array<std::uint8_t, 2>{0xFF, 0x7F}) == 32767);
+static_assert(proto::load_le<std::uint32_t>(std::array<std::uint8_t, 4>{0x78, 0x56, 0x34, 0x12}) ==
+              0x12345678);
+static_assert(proto::load_le<std::int32_t>(le_bytes(std::int32_t{-123456789})) == -123456789);
 
 // --- COBS: known vectors (Wikipedia, "Consistent Overhead Byte Stuffing") ---------
 
@@ -137,6 +158,18 @@ constexpr A<24> sample_wire{0x08, 0x02, 0x01, 0x02, 0x01, 0x80, 0x96, 0x98,
                             0x02, 0xfa, 0x08, 0x8a, 0xfd, 0xc9, 0xff, 0x51,
                             0xff, 0x32, 0x05, 0x04, 0x42, 0x8d, 0xe9, 0x00};
 static_assert(proto::crc16(sample_payload) == 0xE98D);
+
+// The documented field values sit at the documented offsets.
+template <std::integral T>
+consteval T sample_field(std::size_t offset) {
+    return proto::load_le<T>(std::span{sample_payload}.subspan(offset).template first<sizeof(T)>());
+}
+static_assert(sample_field<std::uint16_t>(2) == 258);
+static_assert(sample_field<std::uint32_t>(4) == 10'000'000);
+static_assert(sample_field<std::int16_t>(8) == 250 && sample_field<std::int16_t>(10) == -630 &&
+              sample_field<std::int16_t>(12) == -55);
+static_assert(sample_field<std::int16_t>(14) == -175 && sample_field<std::int16_t>(16) == 50 &&
+              sample_field<std::int16_t>(18) == 16900);
 
 consteval bool frame_encodes_test_vector() {
     std::array<std::uint8_t, proto::max_frame> out{};
