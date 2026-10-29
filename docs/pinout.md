@@ -25,8 +25,8 @@ Keep this file in sync with the code: change a pin there, change it here in the 
 
 | MCU  | Function                       | Notes                                   |
 |------|--------------------------------|-----------------------------------------|
-| PA2  | USART2_TX -> ST-LINK VCP       | planned; SB3/SB4 ON; `/dev/ttyACM0`     |
-| PA3  | USART2_RX <- ST-LINK VCP       | planned                                 |
+| PA2  | USART2_TX -> ST-LINK VCP, AF1  | in use; SB3/SB4 ON; `/dev/ttyACM0`      |
+| PA3  | USART2_RX <- ST-LINK VCP, AF1  | in use (enabled, not read yet); pull-up |
 | PA13 | SWDIO                          | ST-LINK flashing/debug; do not reuse    |
 | PA14 | SWCLK                          | ST-LINK flashing/debug; do not reuse    |
 | PC6  | LD3 green user LED             | default SB13 ON; `fw/hal/src/gpio.cpp`  |
