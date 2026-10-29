@@ -1,9 +1,7 @@
 #include "hal/uart.hpp"
 
-#include <initializer_list>
-
 #include "hal/ring.hpp"
-
+#include "pins.hpp"
 #include "stm32g0xx_ll_bus.h"
 #include "stm32g0xx_ll_gpio.h"
 #include "stm32g0xx_ll_usart.h"
@@ -11,10 +9,6 @@
 namespace {
 
 USART_TypeDef* const uart = USART2;
-
-GPIO_TypeDef* const port = GPIOA;
-constexpr std::uint32_t tx_pin = LL_GPIO_PIN_2;
-constexpr std::uint32_t rx_pin = LL_GPIO_PIN_3;
 
 // 64 bytes hold ~5.5 ms of input at 115200 baud: longer than a blocking status line.
 constexpr std::size_t rx_size = 64;
@@ -42,19 +36,20 @@ extern "C" void USART2_IRQHandler() {
 namespace hal {
 
 void uart_init(std::uint32_t baud) {
-    LL_IOP_GRP1_EnableClock(LL_IOP_GRP1_PERIPH_GPIOA);
+    LL_IOP_GRP1_EnableClock(pins::uart_port_clock);
     LL_APB1_GRP1_EnableClock(LL_APB1_GRP1_PERIPH_USART2);
 
-    // AF1 = USART2 on PA2/PA3 (DS12992 Table 13). Pull-up on RX keeps it idle-high if the
-    // VCP is disconnected.
-    for (const auto pin : {tx_pin, rx_pin}) {
-        LL_GPIO_SetAFPin_0_7(port, pin, LL_GPIO_AF_1);
-        LL_GPIO_SetPinOutputType(port, pin, LL_GPIO_OUTPUT_PUSHPULL);
-        LL_GPIO_SetPinSpeed(port, pin, LL_GPIO_SPEED_FREQ_LOW);
-        LL_GPIO_SetPinMode(port, pin, LL_GPIO_MODE_ALTERNATE);
-    }
-    LL_GPIO_SetPinPull(port, tx_pin, LL_GPIO_PULL_NO);
-    LL_GPIO_SetPinPull(port, rx_pin, LL_GPIO_PULL_UP);
+    // Pull-up on RX keeps it idle-high if the VCP is disconnected.
+    LL_GPIO_InitTypeDef cfg{.Pin = pins::uart_tx,
+                            .Mode = LL_GPIO_MODE_ALTERNATE,
+                            .Speed = LL_GPIO_SPEED_FREQ_LOW,
+                            .OutputType = LL_GPIO_OUTPUT_PUSHPULL,
+                            .Pull = LL_GPIO_PULL_NO,
+                            .Alternate = pins::uart_af};
+    LL_GPIO_Init(pins::uart_port, &cfg);
+    cfg.Pin = pins::uart_rx;
+    cfg.Pull = LL_GPIO_PULL_UP;
+    LL_GPIO_Init(pins::uart_port, &cfg);
 
     // CR1/BRR are writable only with UE = 0. Reset values: 8 data bits, no parity,
     // 1 stop bit, OVER8 = 0 (oversampling by 16, see uart_brr()).

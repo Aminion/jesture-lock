@@ -1,7 +1,6 @@
 #pragma once
 
-// Pin mapping for Nucleo-32 G031K8: USART2 (ST-LINK VCP), I2C, LSM6DS3 INT1/INT2.
-// User LED LD3 (green): PC6 (UM2591).
+// User LED LD3 (green) on the Nucleo-32. Pin assignments: src/pins.hpp, docs/pinout.md.
 
 namespace hal {
 

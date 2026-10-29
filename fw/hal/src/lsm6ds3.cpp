@@ -35,13 +35,12 @@ namespace hal {
 std::expected<Lsm6ds3Probe, I2cError> lsm6ds3_probe() {
     I2cError error = I2cError::nack;
     for (const std::uint8_t addr : addresses) {
-        std::uint8_t who_am_i = 0;
-        const auto r = i2c_read_regs(addr, reg_who_am_i, std::span(&who_am_i, 1));
-        if (r) {
-            return Lsm6ds3Probe{.addr = addr, .who_am_i = who_am_i};
+        const auto who_am_i = i2c_read_reg(addr, reg_who_am_i);
+        if (who_am_i) {
+            return Lsm6ds3Probe{.addr = addr, .who_am_i = *who_am_i};
         }
         if (error == I2cError::nack) {
-            error = r.error();
+            error = who_am_i.error();
         }
     }
     return std::unexpected(error);
@@ -49,27 +48,24 @@ std::expected<Lsm6ds3Probe, I2cError> lsm6ds3_probe() {
 
 std::expected<void, I2cError> lsm6ds3_init(std::uint8_t addr) {
     // BDU first: an output register pair is never half old, half new.
-    const std::uint8_t ctrl3 = ctrl3_bdu | ctrl3_if_inc;
-    if (auto r = i2c_write_regs(addr, reg_ctrl3_c, std::span(&ctrl3, 1)); !r) {
+    if (auto r = i2c_write_regs(addr, reg_ctrl3_c, {ctrl3_bdu | ctrl3_if_inc}); !r) {
         return r;
     }
     // CTRL1_XL, CTRL2_G. Accel anti-aliasing bandwidth follows the ODR (XL_BW_SCAL_ODR = 0).
     // INT1 push-pull, active high (CTRL3_C PP_OD = H_LACTIVE = 0).
-    const std::uint8_t int1 = int1_drdy_g;
-    if (auto r = i2c_write_regs(addr, reg_int1_ctrl, std::span(&int1, 1)); !r) {
+    if (auto r = i2c_write_regs(addr, reg_int1_ctrl, {int1_drdy_g}); !r) {
         return r;
     }
-    const std::array<std::uint8_t, 2> ctrl{lsm6ds3_ctrl1_xl, lsm6ds3_ctrl2_g};
-    return i2c_write_regs(addr, reg_ctrl1_xl, ctrl);
+    return i2c_write_regs(addr, reg_ctrl1_xl, {lsm6ds3_ctrl1_xl, lsm6ds3_ctrl2_g});
 }
 
 std::expected<std::optional<Lsm6ds3Sample>, I2cError> lsm6ds3_read(std::uint8_t addr) {
-    std::uint8_t status = 0;
-    if (auto r = i2c_read_regs(addr, reg_status, std::span(&status, 1)); !r) {
-        return std::unexpected(r.error());
+    const auto status = i2c_read_reg(addr, reg_status);
+    if (!status) {
+        return std::unexpected(status.error());
     }
     constexpr std::uint8_t both = status_xlda | status_gda;
-    if ((status & both) != both) {
+    if ((*status & both) != both) {
         return std::nullopt;
     }
     std::array<std::uint8_t, lsm6ds3_sample_bytes> raw{};

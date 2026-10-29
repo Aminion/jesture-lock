@@ -48,4 +48,11 @@ void delay_ms(std::uint32_t ms) {
     }
 }
 
+void delay_us(std::uint32_t us) {
+    // <=: the first tick can come right after `start` was read.
+    const std::uint32_t start = micros();
+    while (micros() - start <= us) {
+    }
+}
+
 } // namespace hal

@@ -3,15 +3,17 @@
 #include <atomic>
 
 #include "hal/clock.hpp"
+#include "pins.hpp"
 #include "stm32g0xx_ll_bus.h"
 #include "stm32g0xx_ll_exti.h"
 #include "stm32g0xx_ll_gpio.h"
 
 namespace {
 
-GPIO_TypeDef* const port = GPIOA;
-constexpr std::uint32_t pin = LL_GPIO_PIN_15;
-constexpr std::uint32_t line = LL_EXTI_LINE_15;
+using hal::pins::imu_int1;
+using hal::pins::imu_int1_port;
+constexpr std::uint32_t line = LL_EXTI_LINE_15; // EXTI line n is pin n of the chosen port
+static_assert(line == imu_int1);
 
 // Written only by the interrupt: time first, then count publishes it.
 volatile std::uint32_t g_count = 0;
@@ -31,13 +33,17 @@ extern "C" void EXTI4_15_IRQHandler() {
 namespace hal {
 
 void imu_int_init() {
-    LL_IOP_GRP1_EnableClock(LL_IOP_GRP1_PERIPH_GPIOA);
+    LL_IOP_GRP1_EnableClock(pins::imu_int1_port_clock);
     // The IMU drives INT1 push-pull; the pull-down only keeps the line low while it does not.
-    LL_GPIO_SetPinPull(port, pin, LL_GPIO_PULL_DOWN);
-    LL_GPIO_SetPinMode(port, pin, LL_GPIO_MODE_INPUT);
+    LL_GPIO_InitTypeDef cfg{.Pin = imu_int1,
+                            .Mode = LL_GPIO_MODE_INPUT,
+                            .Speed = LL_GPIO_SPEED_FREQ_LOW,
+                            .OutputType = LL_GPIO_OUTPUT_PUSHPULL,
+                            .Pull = LL_GPIO_PULL_DOWN,
+                            .Alternate = 0};
+    LL_GPIO_Init(imu_int1_port, &cfg);
 
-    // EXTI_EXTICR4.EXTI15 = 0x00: port A (RM0444 EXTI_EXTICR4).
-    LL_EXTI_SetEXTISource(LL_EXTI_CONFIG_PORTA, LL_EXTI_CONFIG_LINE15);
+    LL_EXTI_SetEXTISource(pins::imu_int1_exti_port, LL_EXTI_CONFIG_LINE15);
     LL_EXTI_EnableRisingTrig_0_31(line);
     LL_EXTI_ClearRisingFlag_0_31(line);
     LL_EXTI_EnableIT_0_31(line);
@@ -57,6 +63,6 @@ ImuEdge imu_int_last() {
     }
 }
 
-bool imu_int_high() { return LL_GPIO_IsInputPinSet(port, pin) != 0U; }
+bool imu_int_high() { return LL_GPIO_IsInputPinSet(imu_int1_port, imu_int1) != 0U; }
 
 } // namespace hal

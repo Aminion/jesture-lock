@@ -23,4 +23,7 @@ std::uint32_t micros();
 
 void delay_ms(std::uint32_t ms);
 
+// Busy-waits at least `us` microseconds (TIM2). For short waits, e.g. bit-banged bus timing.
+void delay_us(std::uint32_t us);
+
 } // namespace hal
