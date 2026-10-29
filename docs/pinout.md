@@ -21,6 +21,28 @@ Keep this file in sync with the code: change a pin there, change it here in the 
 - Detected chip: WHO_AM_I 0x69 (LSM6DS3) at 0x6B. Firmware also probes 0x6A and
   accepts 0x69/0x6A/0x6C (see `fw/hal/src/lsm6ds3.cpp`).
 
+## IMU axes
+
+Module HW-661 (shared BMI160/LSM6DS3 layout, `6DS3` box filled). Its silkscreen has two
+axis drawings, one per chip; the lower one (next to `6DS3`) looks like it matches the
+table below, but the table is what was measured.
+Measured 2026-10-29 by putting the breadboard on each edge, raw output of `fw_stream`.
+
+Looking down at the module, Nucleo end to the left (header row with the wires at the bottom):
+
+| Axis | Points to                                   | Accel at rest, +1 g up / down |
+|------|---------------------------------------------|-------------------------------|
+| +X   | left, toward the Nucleo                     | +16050 / -16400               |
+| +Y   | bottom, toward the wired header row         | +16470 / -16370               |
+| +Z   | up, out of the chip face                    | +16900 / -16000               |
+
+- Right-handed, and gyro agrees with accel: positive gyro X/Y/Z is counter-clockwise
+  rotation seen from the tip of that axis (checked on Z by turning flat, on X and Y from
+  the turns between poses).
+- Offsets at rest (to remove in calibration, not in firmware): accel about
+  -175 / +50 / +450 LSB (-11 / +3 / +27 mg), gyro about +250 / -630 / -55 LSB
+  (+2.2 / -5.5 / -0.5 dps).
+
 ## On-board connections (fixed, not on the headers)
 
 | MCU  | Function                       | Notes                                   |
