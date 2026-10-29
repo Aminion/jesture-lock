@@ -1,4 +1,4 @@
-# Register-free parts of fw/hal (header-only: ring buffer, baud/I2C timing math, WHO_AM_I map).
+# Register-free parts of fw/hal (header-only: ring buffer, baud/I2C timing math, WHO_AM_I map, IMU sample decode).
 # Only the include directory: the driver sources need CMSIS/LL and the MCU.
 add_executable(hal_test
     hal_test.cpp

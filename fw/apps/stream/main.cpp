@@ -44,6 +44,12 @@ void put(Line& line, std::string_view s) {
     line.len += n;
 }
 
+void put_int(Line& line, std::int32_t v) {
+    std::array<char, 12> s{}; // "-2147483648"; to_chars cannot fail
+    const auto res = std::to_chars(std::to_address(s.begin()), std::to_address(s.end()), v);
+    put(line, {s.data(), res.ptr});
+}
+
 // Lowercase, no padding for hex: "0x6b".
 void put_uint(Line& line, std::uint32_t v, int base = 10) {
     std::array<char, 32> s{}; // base 2 worst case; to_chars cannot fail
@@ -88,10 +94,39 @@ void echo_input(Echo& echo) {
 struct Status {
     std::uint8_t imu_addr = 0; // 0: nothing answered
     std::uint8_t imu_who_am_i = 0;
-    std::uint8_t i2c_err = 0;  // hal::I2cError of the failed probe
-    bool imu_ok = false;
+    std::uint8_t i2c_err = 0;  // hal::I2cError of the failed probe or init
+    bool imu_ok = false;       // known chip, configured
     std::uint32_t count = 0;
 };
+
+void put_axes(Line& line, const std::array<std::int16_t, 3>& v) {
+    put_int(line, v[0]);
+    put(line, ",");
+    put_int(line, v[1]);
+    put(line, ",");
+    put_int(line, v[2]);
+}
+
+// Bring-up: "imu a=x,y,z g=x,y,z" in raw LSB, "imu stale" if no new sample since the
+// last line, "imu i2c_err=N" if the read failed.
+void send_sample(std::uint8_t addr) {
+    Line line;
+    put(line, "imu ");
+    const auto sample = hal::lsm6ds3_read(addr);
+    if (!sample) {
+        put(line, "i2c_err=");
+        put_uint(line, std::to_underlying(sample.error()));
+    } else if (!sample->has_value()) {
+        put(line, "stale");
+    } else {
+        put(line, "a=");
+        put_axes(line, (*sample)->accel);
+        put(line, " g=");
+        put_axes(line, (*sample)->gyro);
+    }
+    put(line, "\r\n");
+    send(line);
+}
 
 void send_status(Status& status, std::uint32_t now) {
     Line line;
@@ -104,7 +139,14 @@ void send_status(Status& status, std::uint32_t now) {
         put_uint(line, status.imu_addr, 16);
         put(line, " who=0x");
         put_uint(line, status.imu_who_am_i, 16);
-        put(line, status.imu_ok ? " ok" : " unknown");
+        if (status.imu_ok) {
+            put(line, " ok");
+        } else if (status.i2c_err != 0) {
+            put(line, " init i2c_err=");
+            put_uint(line, status.i2c_err);
+        } else {
+            put(line, " unknown");
+        }
     } else {
         put(line, " imu=none i2c_err=");
         put_uint(line, status.i2c_err);
@@ -127,23 +169,41 @@ int main() {
     if (const auto probe = hal::lsm6ds3_probe()) {
         status.imu_addr = probe->addr;
         status.imu_who_am_i = probe->who_am_i;
-        status.imu_ok = hal::lsm6ds3_chip(probe->who_am_i).has_value();
+        if (hal::lsm6ds3_chip(probe->who_am_i)) {
+            const auto init = hal::lsm6ds3_init(probe->addr);
+            status.imu_ok = init.has_value();
+            if (!init) {
+                status.i2c_err = std::to_underlying(init.error());
+            }
+        }
     } else {
         status.i2c_err = std::to_underlying(probe.error());
     }
 
-    // TODO: configure IMU.
+    // Bring-up: a sample line every tick (8 Hz), a status line every 4th.
+    constexpr std::uint32_t tick_ms = 125;
+    constexpr std::uint32_t ticks_per_status = 4;
     Echo echo;
-    std::uint32_t last_status = hal::millis();
+    std::uint32_t last_tick = hal::millis();
+    std::uint32_t ticks = 0;
     for (;;) {
-        // TODO: read sample, timestamp, frame, send.
+        // TODO: read every sample, timestamp, frame, send.
         echo_input(echo);
 
-        // Slow blink = known IMU found, fast blink = no IMU or unknown WHO_AM_I.
         const std::uint32_t now = hal::millis();
-        if (now - last_status >= (status.imu_ok ? 500U : 100U)) {
-            last_status = now;
+        if (now - last_tick < tick_ms) {
+            continue;
+        }
+        last_tick += tick_ms; // no drift from late ticks
+        ++ticks;
+        if (status.imu_ok) {
+            send_sample(status.imu_addr);
+        }
+        // Slow blink (toggle at 2 Hz) = IMU running, fast (8 Hz) = no IMU, unknown or failed.
+        if (!status.imu_ok || ticks % ticks_per_status == 0) {
             hal::led_toggle();
+        }
+        if (ticks % ticks_per_status == 0) {
             send_status(status, now);
         }
     }

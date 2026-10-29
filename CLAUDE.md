@@ -31,7 +31,7 @@ Flash one or the other. Results of both paths on the same recording must match b
 - `core/`: pure recognition core (C++) plus a C ABI. Builds for host and MCU.
 - `fw/proto/`: protocol framing (COBS, CRC16), no hardware dependencies.
 - `fw/hal/`: clocks, pins, I2C/UART/LSM6DS3 drivers. Register-free logic (ring buffer,
-  baud/I2C timing math, WHO_AM_I map) lives in headers, `constexpr` where possible, and is
+  baud/I2C timing math, WHO_AM_I map, IMU sample decode) lives in headers, `constexpr` where possible, and is
   tested on the host in `fw/hal/tests/`.
 - `fw/apps/stream/`, `fw/apps/recognize/`: the two firmwares, `main.cpp` only.
 - `host/`: Rust workspace: `protocol`, `gesture-core` (FFI), `gesture-cli`, `viewer`.

@@ -1,5 +1,6 @@
 // Host tests for the register-free parts of fw/hal. Returns non-zero on failure (ctest).
 // Only headers are used: the drivers themselves need the MCU and are checked on hardware.
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
@@ -79,6 +80,13 @@ consteval int known_who_am_i_values() {
     return n;
 }
 static_assert(known_who_am_i_values() == 3); // 0x00/0xFF (bus stuck) and the rest: unknown
+
+// Little endian per axis, gyro x, y, z then accel x, y, z; full int16 range.
+constexpr std::array<std::uint8_t, hal::lsm6ds3_sample_bytes> raw_sample{
+    0x01, 0x00, 0xFF, 0xFF, 0x00, 0x80, 0xFF, 0x7F, 0x34, 0x12, 0x11, 0x40};
+constexpr hal::Lsm6ds3Sample decoded = hal::lsm6ds3_decode(raw_sample);
+static_assert(decoded.gyro == std::array<std::int16_t, 3>{1, -1, -32768});
+static_assert(decoded.accel == std::array<std::int16_t, 3>{32767, 0x1234, 16401}); // ~1 g
 
 // --- Ring buffer (run time: volatile indices are not constexpr) ------------------
 
