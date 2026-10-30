@@ -261,6 +261,36 @@ mod tests {
         assert_eq!(Message::Sample(SAMPLE).encode(), SAMPLE_PAYLOAD);
     }
 
+    // Same bytes as the "Messages" checks in proto/tests/proto_test.cpp.
+    #[test]
+    fn layouts_match_firmware() {
+        let hello = Message::Hello(Hello {
+            fw: Firmware::Stream,
+            imu: ImuStatus::Ok,
+            imu_addr: 0x6B,
+            who_am_i: 0x69,
+            ctrl1_xl: 0x40,
+            ctrl2_g: 0x48,
+        });
+        let hello_bytes = [0x01, 0x01, 0x01, 0x01, 0x6B, 0x69, 0x40, 0x48];
+        assert_eq!(hello.encode(), hello_bytes);
+        assert_eq!(Message::decode(&hello_bytes), Ok(Some(hello)));
+
+        let status = Message::Status(Status {
+            t_us: 0x0403_0201,
+            missed: 5,
+            stuck: 0x0100,
+            i2c_err: 0x00FF_0000,
+            rx_err: 0xFFFF_FFFF,
+        });
+        let status_bytes = [
+            0x03, 0x01, 0x01, 0x02, 0x03, 0x04, 0x05, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00,
+            0x00, 0x00, 0xFF, 0x00, 0xFF, 0xFF, 0xFF, 0xFF,
+        ];
+        assert_eq!(status.encode(), status_bytes);
+        assert_eq!(Message::decode(&status_bytes), Ok(Some(status)));
+    }
+
     #[test]
     fn round_trips() {
         let messages = [
