@@ -136,6 +136,24 @@ UI (`viewer`, egui):
 6. [ ] Raw signal plot (gyro and accel, 6 axes) for debugging, with clipping marked
    (near the range ends: the `peaks` run at +-2 g / 250 dps reached ~1.8 g and 182 dps).
 
+## Step 4: fusion algorithms compared
+
+After Step 3 works end to end. Standard filters, each where it fits, chosen by numbers on
+the recordings. A winner becomes a new `core.h` version (another implementation of the
+contract, run against the same conformance vectors).
+
+1. [ ] Bake-off in `gesture-cli` (f64): Mahony, Madgwick, ESKF with zero-velocity updates
+   and an RTS smoother, and the v1 method, on ruler-15, ruler-30, air-lines and peaks.
+   Compare distance error, tilt error at the end hold, v_end, and how the path looks.
+2. [ ] Continuous attitude (Mahony or Madgwick, by the bake-off): board orientation at all
+   times, also between strokes, for a live 3D board model in the viewer. Accel as "down"
+   is right while the board is near still; core v2 adds `gc_attitude()` (fixed point, on
+   the MCU too).
+3. [ ] ESKF + RTS smoother as the stroke path (if it beats v1): estimates position,
+   velocity, attitude and gyro/accel biases together; the holds are zero-velocity
+   measurements and the smoother replaces the linear drift correction. Fixed-point
+   matrices and numerical stability on the M0+; state size may grow (`GC_STATE_SIZE`).
+
 # Later
 
 Deferred adjustments, with the numbers that motivated them.
