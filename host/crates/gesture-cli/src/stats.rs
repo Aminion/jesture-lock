@@ -211,6 +211,31 @@ pub fn report(rec: &Recording) -> anyhow::Result<String> {
         "\n|accel| {:.2} mg, z axis {tilt:.2} deg from gravity",
         norm(a)
     )?;
+    // Near clipping: a reading within 10% of the end of the int16 range (the chip may
+    // saturate a few LSB short of it: peaks run reached 32764); listed per second.
+    const NEAR_LIMIT: i32 = i16::MAX as i32 * 9 / 10;
+    let rows: [(&str, Axes); 2] = [("gyro", |s| s.gyro), ("accel", |s| s.accel)];
+    for (name, f) in rows {
+        let clipped: Vec<f64> = rec
+            .samples
+            .iter()
+            .zip(&t_s)
+            .filter(|((_, s), _)| f(s).iter().any(|&x| i32::from(x).abs() >= NEAR_LIMIT))
+            .map(|(_, &t)| t)
+            .collect();
+        let mut seconds: Vec<u64> = clipped.iter().map(|&t| t as u64).collect();
+        seconds.dedup();
+        writeln!(
+            out,
+            "{name} >= 90% of range: {} samples{}",
+            clipped.len(),
+            if seconds.is_empty() {
+                String::new()
+            } else {
+                format!(", in seconds {seconds:?}")
+            }
+        )?;
+    }
     let gm = mean(&gyro);
     writeln!(
         out,

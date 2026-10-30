@@ -1,0 +1,9 @@
+label = "peaks"
+note = "0-20 s brisk realistic gestures, 20-30 s max effort jabs and twists"
+started = "2026-10-30T21:35:03+02:00"
+seconds = 30
+
+[stream]
+samples = 3061
+rate_hz = 104.182
+failures = []
