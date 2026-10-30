@@ -1,5 +1,5 @@
 //! Host side of the wire protocol. The contract is `docs/protocol.md`;
-//! the firmware side is `fw/proto/`.
+//! the firmware side is `proto/`.
 //!
 //! Bytes from the port go through a [`Deframer`], which yields frame payloads (or a
 //! [`FrameError`] per dropped frame); [`Message::decode`] turns a payload into a message.

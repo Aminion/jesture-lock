@@ -4,10 +4,10 @@ Gesture un/lock with IMU: data capture, gesture recognition, validation.
 The puzzle box with a motion-based lock is out of scope for now.
 
 Two firmwares share the same IMU driver and the same recognition core (`core/`):
-- `fw_stream`: IMU -> UART -> PC. The PC records sessions and visualizes them;
+- `stream` (`firmware/apps/stream/`): IMU -> UART -> PC. The PC records sessions and visualizes them;
   recognition runs on the PC through the host build of `core/` (Rust FFI).
   Used for building the dataset and developing the algorithm.
-- `fw_recognize`: IMU -> `core/` on the MCU -> events over UART.
+- `recognize` (`firmware/apps/recognize/`): IMU -> `core/` on the MCU -> events over UART.
   Used to verify the algorithm on the real target.
 
 Flash one or the other. Results of both paths on the same recording must match bit for bit.
@@ -15,7 +15,7 @@ Flash one or the other. Results of both paths on the same recording must match b
 ## Stack
 - Firmware: C++26 (limited to what arm-none-eabi-gcc supports), no exceptions, no RTTI, no heap. Not OOP: plain structs plus
   free functions, with `std::expected`/`optional`/`variant`/`span`.
-  CMSIS + ST LL drivers, no HAL.
+  CMSIS + ST LL drivers, no ST HAL.
 - Desktop: Rust (stable), egui/eframe for the viewer. No Python.
 - Build: CMake + Ninja, presets `firmware` and `host`.
 - Environment: Nix flakes only. No IDEs, no CubeMX, no global installs.
@@ -29,12 +29,15 @@ Flash one or the other. Results of both paths on the same recording must match b
 
 ## Structure
 - `core/`: pure recognition core (C++) plus a C ABI. Builds for host and MCU.
-- `fw/proto/`: protocol framing (COBS, CRC16), no hardware dependencies.
-- `fw/hal/`: clocks, pins, I2C/UART/LSM6DS3 drivers. Register-free logic (ring buffer,
+- `proto/`: protocol framing (COBS, CRC16), no hardware dependencies. Builds for host and MCU;
+  `host/crates/protocol` mirrors it.
+- `firmware/board/`: clocks, pins, I2C/UART/LSM6DS3 drivers. Register-free logic (ring buffer,
   baud/I2C timing math, WHO_AM_I map, IMU sample decode) lives in headers, `constexpr` where possible, and is
-  tested on the host in `fw/hal/tests/`.
-- `fw/apps/stream/`, `fw/apps/recognize/`: the two firmwares, `main.cpp` only.
-- `test/`: shared helpers for the host test executables (`gesture_test/check.hpp`).
+  tested on the host in `firmware/board/tests/`.
+- `firmware/apps/stream/`, `firmware/apps/recognize/`: the two firmwares, `main.cpp` only.
+- `test_support/`: shared helpers for the host test executables (`gesture/test/check.hpp`).
+- C++ public headers use one prefix: `gesture/core.h`, `gesture/proto/`, `gesture/board/`,
+  `gesture/test/`.
 - `host/`: Rust workspace: `protocol`, `gesture-core` (FFI), `gesture-cli`, `viewer`.
 - `docs/`: `protocol.md` (the C++/Rust contract), `template_format.md`, `pinout.md` (MCU pins and IMU wiring),
   `todo.md` (current step plan, deferred adjustments),
@@ -66,5 +69,5 @@ Flash one or the other. Results of both paths on the same recording must match b
   toolchain (GCC 15 lacks contracts and `<inplace_vector>`). `std::atomic` on Cortex-M0+
   is load/store only: read-modify-write needs libatomic, which is not linked.
 - clang-tidy runs on every first-party C++ file during the build (both presets), warnings
-  are errors. Fix the code; disable a check only in `.clang-tidy` (or `fw/.clang-tidy`
+  are errors. Fix the code; disable a check only in `.clang-tidy` (or `firmware/.clang-tidy`
   for firmware-only exceptions) with a comment, or `NOLINTNEXTLINE(check)` with a reason.

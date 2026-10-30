@@ -1,5 +1,5 @@
 //! Frames on the wire: `COBS(payload || crc16) 0x00`, `docs/protocol.md` "Framing".
-//! Mirrors `fw/proto/include/proto/frame.hpp`: same limits, same errors.
+//! Mirrors `proto/include/proto/frame.hpp`: same limits, same errors.
 
 use std::fmt;
 

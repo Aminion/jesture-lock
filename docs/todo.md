@@ -6,12 +6,12 @@ Every sample goes to the PC as a binary frame (`docs/protocol.md`), replacing th
 text lines.
 
 1. [x] `docs/protocol.md`: framing, messages, test vector.
-2. [x] `fw/proto`: constexpr COBS, CRC16, frame codec, host tests.
+2. [x] `proto`: constexpr COBS, CRC16, frame codec, host tests.
 3. [x] Rust `protocol` crate: CRC via the `crc` crate (`CRC_16_IBM_3740`), COBS by hand
-   (same canonical encoding as `fw/proto`), frame encode/decode with the same limits and
+   (same canonical encoding as `proto`), frame encode/decode with the same limits and
    errors, a stream deframer that resyncs on 0x00, Hello/Status/Sample types. Tests use
    the `docs/protocol.md` vector and the same COBS cases as `proto_test.cpp`.
-4. [ ] `fw_stream`: a Sample frame per INT1 edge, Hello/Status every 1 s; drop the text
+4. [ ] `stream` firmware: a Sample frame per INT1 edge, Hello/Status every 1 s; drop the text
    lines and the echo.
 5. [ ] `gesture-cli check`: read the stream, count frames, CRC errors and sample gaps.
 
@@ -21,7 +21,7 @@ Deferred adjustments, with the numbers that motivated them.
 
 ## Firmware timing
 
-Measured 2026-10-29 (`fw_stream` bring-up, `drdy` line): sample period 9600 us, latency from
+Measured 2026-10-29 (`stream` firmware bring-up, `drdy` line): sample period 9600 us, latency from
 INT1 edge to sample read up to 7.5 ms, so about 2 ms left before a sample is lost.
 None of this uses DMA yet (`stm32g0xx_ll_dma.c` is built but unused).
 

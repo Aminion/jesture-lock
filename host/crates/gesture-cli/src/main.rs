@@ -1,5 +1,5 @@
-//! gesture-cli: record sessions from fw_stream into `data/`, replay them
-//! through the host build of core/, and compare against fw_recognize events.
+//! gesture-cli: record sessions from the stream firmware into `data/`, replay them
+//! through the host build of core/, and compare against the recognize firmware's events.
 
 use std::io::{self, ErrorKind, Write};
 use std::time::{Duration, Instant};

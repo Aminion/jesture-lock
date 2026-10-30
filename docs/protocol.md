@@ -1,6 +1,6 @@
 # Wire protocol
 
-The contract between `fw/proto` (C++) and `host/crates/protocol` (Rust).
+The contract between `proto` (C++) and `host/crates/protocol` (Rust).
 Change this document first, then both sides.
 
 Protocol version: **1**.
@@ -8,7 +8,7 @@ Protocol version: **1**.
 ## Transport
 - USART2 through the ST-LINK virtual COM port, 115200 baud, 8N1.
 - Byte order: little-endian for every multi-byte field.
-- `fw_stream` sends only frames; the bring-up text lines are gone.
+- The `stream` firmware sends only frames; the bring-up text lines are gone.
 
 ## Framing
 Frame on the wire: `COBS(payload || crc16) 0x00`.
@@ -42,9 +42,9 @@ Message types:
 |------|---------|-----------|
 | 0    | (invalid, never sent) | |
 | 1    | `Hello`  | MCU -> PC |
-| 2    | `Sample` | MCU -> PC (`fw_stream`) |
+| 2    | `Sample` | MCU -> PC (`stream`) |
 | 3    | `Status` | MCU -> PC |
-| 4    | `Event`  | MCU -> PC (`fw_recognize`), reserved, layout TBD |
+| 4    | `Event`  | MCU -> PC (`recognize`), reserved, layout TBD |
 
 A message with a length other than the one given for its type is dropped and counted as an error.
 
@@ -65,7 +65,7 @@ Sent once at boot and then once per second, so a PC that connects later still ge
 |--------|------|-----------|-------|
 | 0      | 1    | type      | 1 |
 | 1      | 1    | version   | |
-| 2      | 1    | fw        | 1 = `fw_stream`, 2 = `fw_recognize` |
+| 2      | 1    | fw        | 1 = `stream`, 2 = `recognize` |
 | 3      | 1    | imu       | 0 = none answered, 1 = ok, 2 = unknown `WHO_AM_I`, 3 = init failed |
 | 4      | 1    | imu_addr  | 7-bit I2C address, 0 if none answered |
 | 5      | 1    | who_am_i  | `WHO_AM_I` value as read, 0 if none answered |
@@ -110,7 +110,7 @@ Sent once per second. Counters are u32, since reset, wrapping.
 | 18     | 4    | rx_err  | UART receive errors (overrun, framing, noise, ring full) |
 
 ### `Event` (type 4)
-`fw_recognize` only. Layout TBD.
+`recognize` firmware only. Layout TBD.
 
 ## Messages: PC -> MCU
 None yet. Later: start/stop streaming, set ODR and full scale.
@@ -133,4 +133,4 @@ crc16    0xe98d  (appended as 8d e9)
 wire     08 02 01 02 01 80 96 98 02 fa 08 8a fd c9 ff 51 ff 32 05 04 42 8d e9 00
 ```
 
-Both `fw/proto/tests` and `host/crates/protocol` check this frame.
+Both `proto/tests` and `host/crates/protocol` check this frame.

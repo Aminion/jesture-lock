@@ -1,6 +1,6 @@
 [package]
 name = "protocol"
-description = "Wire protocol (COBS, CRC16, messages); mirrors docs/protocol.md and fw/proto"
+description = "Wire protocol (COBS, CRC16, messages); mirrors docs/protocol.md and proto"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

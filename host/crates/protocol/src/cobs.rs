@@ -1,4 +1,4 @@
-//! COBS encode/decode, same canonical encoding as `fw/proto/include/proto/cobs.hpp`.
+//! COBS encode/decode, same canonical encoding as `proto/include/proto/cobs.hpp`.
 //! The encoded bytes contain no 0x00; the 0x00 delimiter is not part of them.
 //!
 //! Canonical encoding: a run of 254 non-zero bytes that ends the input gets no extra empty
@@ -60,7 +60,7 @@ impl fmt::Display for CobsError {
 
 impl std::error::Error for CobsError {}
 
-/// Decodes at most `max_len` bytes; errors are checked in the same order as `fw/proto`,
+/// Decodes at most `max_len` bytes; errors are checked in the same order as `proto`,
 /// so both sides report the same error for the same input. Empty input decodes to nothing.
 pub fn decode(input: &[u8], max_len: usize) -> Result<Vec<u8>, CobsError> {
     let mut out = Vec::with_capacity(input.len().min(max_len));

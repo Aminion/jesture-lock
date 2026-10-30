@@ -1,7 +1,7 @@
 include(${CMAKE_CURRENT_LIST_DIR}/gesture_options.cmake)
 
 # clang-tidy on every first-party C++ file as it compiles (vendor code is C/asm only).
-# Config: .clang-tidy at the root, fw/.clang-tidy for firmware-specific exceptions.
+# Config: .clang-tidy at the root, firmware/.clang-tidy for firmware-specific exceptions.
 option(GESTURE_CLANG_TIDY "Run clang-tidy while compiling" ON)
 if(GESTURE_CLANG_TIDY)
     if(CMAKE_CROSSCOMPILING)

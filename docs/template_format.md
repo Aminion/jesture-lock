@@ -14,4 +14,4 @@ TBD: header (magic, version, count), per-template record, endianness.
 TBD: produced by `gesture-cli` from sessions in `data/`.
 
 ## Embedding in firmware
-TBD: how templates reach `fw_recognize` (compiled-in table, flash page, ...).
+TBD: how templates reach the `recognize` firmware (compiled-in table, flash page, ...).

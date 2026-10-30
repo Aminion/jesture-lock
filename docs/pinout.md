@@ -19,14 +19,14 @@ Keep this file in sync with the code: change a pin there, change it here in the 
 
 - I2C1 at 100 kHz, open-drain, pull-ups on the module (no internal pull-ups).
 - Detected chip: WHO_AM_I 0x69 (LSM6DS3) at 0x6B. Firmware also probes 0x6A and
-  accepts 0x69/0x6A/0x6C (see `fw/hal/src/lsm6ds3.cpp`).
+  accepts 0x69/0x6A/0x6C (see `firmware/board/src/lsm6ds3.cpp`).
 
 ## IMU axes
 
 Module HW-661 (shared BMI160/LSM6DS3 layout, `6DS3` box filled). Its silkscreen has two
 axis drawings, one per chip; the lower one (next to `6DS3`) looks like it matches the
 table below, but the table is what was measured.
-Measured 2026-10-29 by putting the breadboard on each edge, raw output of `fw_stream`.
+Measured 2026-10-29 by putting the breadboard on each edge, raw output of the `stream` firmware.
 
 Looking down at the module, Nucleo end to the left (header row with the wires at the bottom):
 
@@ -51,7 +51,7 @@ Looking down at the module, Nucleo end to the left (header row with the wires at
 | PA3  | USART2_RX <- ST-LINK VCP, AF1  | in use; RXNE interrupt, pull-up        |
 | PA13 | SWDIO                          | ST-LINK flashing/debug; do not reuse    |
 | PA14 | SWCLK                          | ST-LINK flashing/debug; do not reuse    |
-| PC6  | LD3 green user LED             | default SB13 ON; `fw/hal/src/gpio.cpp`  |
+| PC6  | LD3 green user LED             | default SB13 ON; `firmware/board/src/gpio.cpp`  |
 | NRST | reset                          | also on CN3-3 and CN4-3                 |
 
 LD1 (ST-LINK COM) and LD2 (power) are not MCU-controlled.

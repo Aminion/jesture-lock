@@ -6,19 +6,19 @@ list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake)
 include(project_options)
 
 add_subdirectory(core)
-add_subdirectory(fw/proto)
+add_subdirectory(proto)
 
 if(CMAKE_CROSSCOMPILING)
     enable_language(ASM)
 endif()
-add_subdirectory(fw/hal) # host: headers only
+add_subdirectory(firmware/board) # host: headers only
 
 if(CMAKE_CROSSCOMPILING)
-    add_subdirectory(fw/apps)
+    add_subdirectory(firmware/apps)
 else()
     enable_testing()
-    add_subdirectory(test)
+    add_subdirectory(test_support)
     add_subdirectory(core/tests)
-    add_subdirectory(fw/proto/tests)
-    add_subdirectory(fw/hal/tests)
+    add_subdirectory(proto/tests)
+    add_subdirectory(firmware/board/tests)
 endif()
