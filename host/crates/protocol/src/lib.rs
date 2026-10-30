@@ -8,6 +8,7 @@ pub mod cobs;
 pub mod deframer;
 pub mod frame;
 pub mod message;
+pub mod time;
 
 pub use deframer::Deframer;
 pub use frame::FrameError;

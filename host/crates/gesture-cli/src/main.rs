@@ -1,12 +1,17 @@
 //! gesture-cli: record sessions from the stream firmware into `data/`, replay them
 //! through the host build of core/, and compare against the recognize firmware's events.
 
-use std::io::{self, ErrorKind, Write};
+mod check;
+
+use std::io::ErrorKind;
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, bail};
 use clap::{Args, Parser, Subcommand};
+use protocol::{Deframer, Message};
 use serialport::{ClearBuffer, SerialPort};
+
+use crate::check::Stats;
 
 #[derive(Debug, Parser)]
 #[command(version, about)]
@@ -17,18 +22,17 @@ struct Cli {
 
 #[derive(Debug, Subcommand)]
 enum Command {
-    /// Print raw bytes from the serial port to stdout (bring-up, plain-text firmware output).
-    Monitor {
+    /// Read the stream and check it: frame errors, lost frames, missed samples, MCU counters.
+    /// Exits non-zero if anything went wrong.
+    Check {
         #[command(flatten)]
         port: PortArgs,
-    },
-    /// Send numbered lines and check that the firmware echoes each one back (bring-up).
-    Echo {
-        #[command(flatten)]
-        port: PortArgs,
-        /// Number of lines to send.
-        #[arg(long, default_value_t = 100)]
-        count: u32,
+        /// How long to read.
+        #[arg(long, default_value_t = 10)]
+        seconds: u64,
+        /// Print every decoded message.
+        #[arg(long)]
+        print: bool,
     },
 }
 
@@ -41,14 +45,11 @@ struct PortArgs {
     baud: u32,
 }
 
-/// Longest payload the firmware echoes without truncation (72-byte line minus "echo " and CRLF).
-const MAX_ECHO: usize = 64;
-
 /// Read chunk size; the port timeout, not the buffer, paces the loops.
 const READ_BUF: usize = 256;
 
-/// How long `echo` waits for each line to come back.
-const ECHO_TIMEOUT: Duration = Duration::from_secs(1);
+/// How often `check` prints a progress line (PC time: it only paces the output).
+const REPORT_EVERY: Duration = Duration::from_secs(1);
 
 fn open(PortArgs { port, baud }: &PortArgs) -> anyhow::Result<Box<dyn SerialPort>> {
     serialport::new(port, *baud)
@@ -68,106 +69,117 @@ fn read_some(serial: &mut dyn SerialPort, buf: &mut [u8]) -> anyhow::Result<usiz
     }
 }
 
-/// Printable ASCII, cycling through the whole range, `len` bytes, starting at `seed`.
-fn payload(seed: u32, len: usize) -> String {
-    (0..len)
-        .map(|i| char::from(b' ' + ((seed as usize + i) % 95) as u8))
-        .collect()
-}
-
-/// Next line without CR/LF; a partial line stays in `pending` across calls.
-/// `None` if `deadline` passes first.
-fn read_line(
-    serial: &mut dyn SerialPort,
-    pending: &mut Vec<u8>,
-    deadline: Instant,
-) -> anyhow::Result<Option<String>> {
-    loop {
-        if let Some(end) = pending.iter().position(|&b| b == b'\n') {
-            let line: Vec<u8> = pending.drain(..=end).collect();
-            let text = String::from_utf8_lossy(&line);
-            return Ok(Some(text.trim_end_matches(['\r', '\n']).to_owned()));
-        }
-        if Instant::now() >= deadline {
-            return Ok(None);
-        }
-        let mut buf = [0u8; READ_BUF];
-        let n = read_some(serial, &mut buf)?;
-        pending.extend_from_slice(&buf[..n]);
-    }
-}
-
-/// Reads and discards until nothing arrives for `quiet`.
-fn drain(serial: &mut dyn SerialPort, quiet: Duration) -> anyhow::Result<()> {
-    serial.clear(ClearBuffer::Input)?;
-    let mut last = Instant::now();
-    let mut buf = [0u8; READ_BUF];
-    while last.elapsed() < quiet {
-        if read_some(serial, &mut buf)? > 0 {
-            last = Instant::now();
-        }
-    }
-    Ok(())
-}
-
-fn echo(port: &PortArgs, count: u32) -> anyhow::Result<()> {
-    let mut serial = open(port)?;
-    // The ST-LINK keeps a backlog of MCU output from while the port was closed and sends
-    // it in a burst on open. Drop input until it goes quiet: status lines are 500 ms apart.
-    drain(serial.as_mut(), Duration::from_millis(200))?;
-    let mut pending = Vec::new();
-    let mut rtts = Vec::new();
-    let mut skipped = 0u32;
-
-    for i in 0..count {
-        let prefix = format!("ping {i} ");
-        let sent = prefix.clone() + &payload(i, (i as usize * 7) % (MAX_ECHO - prefix.len() + 1));
-        let start = Instant::now();
-        serial.write_all(format!("{sent}\n").as_bytes())?;
-        let deadline = start + ECHO_TIMEOUT;
-        loop {
-            let Some(line) = read_line(serial.as_mut(), &mut pending, deadline)? else {
-                bail!("line {i}: no echo within {ECHO_TIMEOUT:?} (sent {sent:?})");
-            };
-            // Status lines, and a garbled first line left over in the VCP, are not echoes.
-            let Some(got) = line.strip_prefix("echo ") else {
-                if skipped == 0 {
-                    println!("skip: {line}");
-                }
-                skipped += 1;
-                continue;
-            };
-            if got != sent {
-                bail!("line {i}: sent {sent:?}, got {line:?}");
+/// Feeds one deframed frame to `stats`, printing events (and messages if `print`).
+fn handle(stats: &mut Stats, frame: Result<Vec<u8>, protocol::FrameError>, print: bool) {
+    let payload = match frame {
+        Ok(p) => p,
+        Err(e) => {
+            if print {
+                println!("frame error: {e}");
             }
-            break;
+            return stats.frame_error(e);
         }
-        rtts.push(start.elapsed());
+    };
+    match Message::decode(&payload) {
+        Err(e) => {
+            if print {
+                println!("message error: {e}");
+            }
+            stats.message_error(e);
+        }
+        Ok(None) => stats.skipped(),
+        Ok(Some(m)) => {
+            if print {
+                println!("{m:?}");
+            }
+            if let Some(event) = stats.message(&m) {
+                println!("{event}");
+            }
+        }
     }
-
-    let min = rtts.iter().min().copied().unwrap_or_default();
-    let max = rtts.iter().max().copied().unwrap_or_default();
-    let avg = rtts.iter().sum::<Duration>() / count.max(1);
-    println!(
-        "echo: {count}/{count} lines ok, rtt min {min:.1?} avg {avg:.1?} max {max:.1?}, {skipped} other lines skipped"
-    );
-    Ok(())
 }
 
-fn monitor(port: &PortArgs) -> anyhow::Result<()> {
-    let mut serial = open(port)?;
-    let mut stdout = io::stdout().lock();
-    let mut buf = [0u8; READ_BUF];
-    loop {
-        let n = read_some(serial.as_mut(), &mut buf)?;
-        stdout.write_all(&buf[..n])?;
-        stdout.flush()?;
+fn report(stats: &mut Stats, elapsed: Duration) {
+    let secs = elapsed.as_secs();
+    if !stats.started() {
+        println!("t={secs}s waiting for Hello");
+        return;
     }
+    let iv = stats.take_interval();
+    let dt = iv
+        .dt
+        .map_or("-".to_owned(), |(lo, hi)| format!("{lo}..{hi} us"));
+    let t = stats.totals();
+    let m = &t.mcu;
+    println!(
+        "t={secs}s samples {} dt {dt} | frame_err {} lost {} t_gaps {} | mcu missed {} stuck {} i2c {} rx {}",
+        iv.samples,
+        t.frame_errors.total(),
+        t.lost,
+        t.t_gaps,
+        m.missed,
+        m.stuck,
+        m.i2c_err,
+        m.rx_err
+    );
+}
+
+fn check(port: &PortArgs, seconds: u64, print: bool) -> anyhow::Result<()> {
+    let mut serial = open(port)?;
+    serial.clear(ClearBuffer::Input)?;
+    let mut deframer = Deframer::new();
+    let mut stats = Stats::new();
+    let start = Instant::now();
+    let duration = Duration::from_secs(seconds);
+    let mut next_report = REPORT_EVERY;
+    let mut buf = [0u8; READ_BUF];
+    while start.elapsed() < duration {
+        let n = read_some(serial.as_mut(), &mut buf)?;
+        for frame in deframer.feed(&buf[..n]) {
+            handle(&mut stats, frame, print);
+        }
+        if start.elapsed() >= next_report {
+            report(&mut stats, next_report);
+            next_report += REPORT_EVERY;
+        }
+    }
+
+    let t = stats.totals();
+    let e = &t.frame_errors;
+    let rate = t.rate_hz().map_or("-".to_owned(), |r| format!("{r:.2} Hz"));
+    println!(
+        "total: {} samples ({rate}, MCU time), frame errors {} (cobs {} short {} long {} crc {}), \
+         message errors {}, skipped {}, lost {}, t_gaps {}, resets {} | mcu missed {} stuck {} i2c {} rx {}",
+        t.samples,
+        e.total(),
+        e.cobs,
+        e.too_short,
+        e.too_long,
+        e.crc,
+        t.message_errors,
+        t.skipped,
+        t.lost,
+        t.t_gaps,
+        t.resets,
+        t.mcu.missed,
+        t.mcu.stuck,
+        t.mcu.i2c_err,
+        t.mcu.rx_err
+    );
+    let failures = stats.failures();
+    if !failures.is_empty() {
+        bail!("check failed: {}", failures.join(", "));
+    }
+    println!("ok");
+    Ok(())
 }
 
 fn main() -> anyhow::Result<()> {
     match Cli::parse().command {
-        Command::Monitor { port } => monitor(&port),
-        Command::Echo { port, count } => echo(&port, count),
+        Command::Check {
+            port,
+            seconds,
+            print,
+        } => check(&port, seconds, print),
     }
 }

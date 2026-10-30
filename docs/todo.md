@@ -13,7 +13,7 @@ text lines.
    the `docs/protocol.md` vector and the same COBS cases as `proto_test.cpp`.
 4. [x] `stream` firmware: a Sample frame per INT1 edge, Hello/Status every 1 s; drop the text
    lines and the echo.
-5. [ ] `gesture-cli check`: read the stream, count frames, CRC errors and sample gaps.
+5. [x] `gesture-cli check`: read the stream, count frames, CRC errors and sample gaps.
 
 # Later
 

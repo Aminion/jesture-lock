@@ -89,6 +89,21 @@ pub struct Hello {
     pub ctrl2_g: u8,
 }
 
+impl Hello {
+    /// Nominal time between `Sample`s from the gyro ODR in CTRL2_G (INT1 is gyro data
+    /// ready). `None` if the gyro is off or the code is not a gyro ODR. The IMU clock
+    /// is not exact: measured 9600 us against a nominal 9615 us.
+    pub fn sample_period_us(&self) -> Option<u32> {
+        // ODR_G[3:0] codes 1..8 (LSM6DS3 / LSM6DS3TR-C datasheets, CTRL2_G), in mHz.
+        const ODR_MHZ: [u32; 8] = [
+            12_500, 26_000, 52_000, 104_000, 208_000, 416_000, 833_000, 1_660_000,
+        ];
+        let code = usize::from(self.ctrl2_g >> 4);
+        let odr = ODR_MHZ.get(code.checked_sub(1)?)?;
+        Some(1_000_000_000 / odr)
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Sample {
     /// +1 per `Sample`, wraps; 0 after reset.
@@ -363,6 +378,24 @@ mod tests {
                 len: 2
             })
         );
+    }
+
+    #[test]
+    fn sample_period() {
+        let hello = |ctrl2_g| Hello {
+            fw: Firmware::Stream,
+            imu: ImuStatus::Ok,
+            imu_addr: 0x6B,
+            who_am_i: 0x69,
+            ctrl1_xl: 0x40,
+            ctrl2_g,
+        };
+        assert_eq!(hello(0x40).sample_period_us(), Some(9615)); // 104 Hz, +-250 dps
+        assert_eq!(hello(0x4C).sample_period_us(), Some(9615)); // full scale bits ignored
+        assert_eq!(hello(0x10).sample_period_us(), Some(80_000)); // 12.5 Hz
+        assert_eq!(hello(0x80).sample_period_us(), Some(602)); // 1.66 kHz
+        assert_eq!(hello(0x00).sample_period_us(), None); // power down
+        assert_eq!(hello(0x90).sample_period_us(), None); // not a gyro ODR
     }
 
     // Unknown types are skipped, including Event (type 4, layout TBD).
