@@ -37,7 +37,7 @@ Flash one or the other. Results of both paths on the same recording must match b
 - `test/`: shared helpers for the host test executables (`gesture_test/check.hpp`).
 - `host/`: Rust workspace: `protocol`, `gesture-core` (FFI), `gesture-cli`, `viewer`.
 - `docs/`: `protocol.md` (the C++/Rust contract), `template_format.md`, `pinout.md` (MCU pins and IMU wiring),
-  `todo.md` (deferred adjustments),
+  `todo.md` (current step plan, deferred adjustments),
   `datasheets/` (vendor PDFs, gitignored; manifest + checksums committed).
 - `data/`: recorded sessions.
 

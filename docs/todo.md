@@ -1,3 +1,20 @@
+# To do
+
+## Step 2b: full-rate binary stream
+
+Every sample goes to the PC as a binary frame (`docs/protocol.md`), replacing the bring-up
+text lines.
+
+1. [x] `docs/protocol.md`: framing, messages, test vector.
+2. [x] `fw/proto`: constexpr COBS, CRC16, frame codec, host tests.
+3. [ ] Rust `protocol` crate: CRC via the `crc` crate (`CRC_16_IBM_3740`), COBS by hand
+   (same canonical encoding as `fw/proto`), frame encode/decode with the same limits and
+   errors, a stream deframer that resyncs on 0x00, Hello/Status/Sample types. Tests use
+   the `docs/protocol.md` vector and the same COBS cases as `proto_test.cpp`.
+4. [ ] `fw_stream`: a Sample frame per INT1 edge, Hello/Status every 1 s; drop the text
+   lines and the echo.
+5. [ ] `gesture-cli check`: read the stream, count frames, CRC errors and sample gaps.
+
 # Later
 
 Deferred adjustments, with the numbers that motivated them.
