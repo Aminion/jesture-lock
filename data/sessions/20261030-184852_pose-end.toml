@@ -1,0 +1,9 @@
+label = "pose-end"
+note = "short  edge"
+started = "2026-10-30T18:48:52+02:00"
+seconds = 20
+
+[stream]
+samples = 2074
+rate_hz = 104.194
+failures = []

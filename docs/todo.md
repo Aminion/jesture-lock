@@ -20,8 +20,8 @@ text lines.
 See the 3D path of one stroke. No recognition and no templates yet. Later: a gesture is a
 sequence of strokes with holds between them.
 
-Stroke: still -> move -> still. Still ~0.3 s, detected automatically from gyro and accel
-(no button on the Nucleo-32). The holds give zero velocity at both ends of a stroke.
+Stroke: still -> move -> still. Still >= ~1 s in the hand (measured below), detected
+automatically from gyro and accel (no button on the Nucleo-32). The holds give zero velocity at both ends of a stroke.
 
 Path (details to be discussed first): accel and gyro fused. At rest: gyro bias and gravity
 direction. During the stroke: gyro updates the tilt, accel minus gravity is integrated
@@ -31,8 +31,37 @@ draws and converts to physical units.
 
 ### 3a: recording
 
-1. [ ] `gesture-cli record`: raw stream to a file in `data/`, replayable, so fusion is
+1. [x] `gesture-cli record`: raw stream to a file in `data/`, replayable, so fusion is
    tuned on the same data every run.
+2. [x] Analysis on recordings (`gesture-cli`, f64, for reading only): `stats` (bias, noise,
+   drift on still data), `timeline` (spread per window), `calib` (accel offset and gain per
+   axis from a tumble session), `path` (float reference of the stroke path, to try the
+   method before the integer spec; `core/` replaces it).
+
+#### Measurements (2026-10-30, `data/sessions/`, +-2 g / 250 dps, 104 Hz)
+
+| session | what | result |
+|---|---|---|
+| `rest-table` | 60 s flat on the table | gyro bias +1.84 -5.71 -0.40 dps (6 deg/s total), moves < 0.01 dps over 60 s; noise 0.05 dps, 0.5-0.8 mg; \|accel\| 1032.6 mg; drift on noise alone with ZUPT: 0.3 mm per 1 s, 0.9 mm per 2 s |
+| `pose-edge`, `pose-end` | on the long edge, on the short end | y reads -999 mg, x +977 mg; gyro bias the same within 0.06 dps in every pose |
+| `tumble` | 14 hand-held poses | offset x -11.2 y +3.7 z +27.6 mg, gain x 1.0089 y 0.9985 z 0.9965; \|a\| error 18.2 mg rms raw -> 1.1 mg fitted |
+| `hand-hold` | 4 holds in hand, small moves between | still in hand: gyro std 0.5-2.3 dps, accel std 3-13 mg, rate 0.1-2.8 dps; moving: >= 5 dps, >= 15 mg, >= 4.5 dps; ~0.5 s to settle after a move; soft starts are seen ~0.25 s late |
+| `ruler-30` | 5 table slides of 30 cm, 2.7-4.8 s each | 307-359 mm (mean 334, +11%); gyro std 0.1-0.3 dps and accel std 9-30 mg while sliding, so hand thresholds miss the slow end: needs table thresholds |
+| `ruler-15` | 5 table slides of 15 cm, 2.1-3.3 s each | 143-156 mm (mean 149, -0.5%), v_end 10-36 mm/s, tilt error 0.05-0.12 deg: no scale error in the method; the +11% at 30 cm is unexplained (longer strokes, 0.5 deg turn, or overshoot) |
+| `air-lines` | ~20 cm lines in the air, hand holds between | per-hold gyro bias: tilt error 1.3-3.8 deg, v_end 140-570 mm/s; session bias: tilt error 0.4-1.0 deg, v_end 33-170 mm/s, strokes along clean directions (up/down within 25-51 mm of vertical) |
+
+Design inputs for `docs/core.md`:
+- Accel calibration per board (3 offsets, 3 gains) from a tumble session, passed in at
+  init: without it rotation leaks up to ~28 mg (~14 cm per 1 s stroke).
+- Gyro bias: one long-lived estimate (power-up on the table, updated only when table-quiet),
+  never from a short hand hold (a still hand turns 1-3 dps).
+- Still detection: gyro std, accel std and gyro rate together; table and hand need
+  different thresholds (adaptive to the noise in the hold, or two levels). A still run
+  under 0.5 s is a pause inside the move.
+- Gravity: mean of 0.3 s ending 0.1 s before the detected move.
+- Zero-velocity correction p - v_end t^2 / (2T), linear velocity error.
+- Drop strokes below a minimum size or speed (table bumps gave 0.1-0.5 mm "strokes").
+- A hold between strokes is >= ~1 s in the hand (0.5 s settle + window).
 
 ### 3b: core contract
 

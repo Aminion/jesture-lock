@@ -1,0 +1,9 @@
+label = "tumble"
+note = "~15 still poses"
+started = "2026-10-30T20:57:57+02:00"
+seconds = 60
+
+[stream]
+samples = 6199
+rate_hz = 104.179
+failures = []

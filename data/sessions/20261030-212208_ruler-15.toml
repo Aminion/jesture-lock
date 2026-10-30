@@ -1,0 +1,9 @@
+label = "ruler-15"
+note = "15 cm along ruler, x axis, same corner, hold 2 s each end, 5 times"
+started = "2026-10-30T21:22:08+02:00"
+seconds = 40
+
+[stream]
+samples = 4103
+rate_hz = 104.158
+failures = []

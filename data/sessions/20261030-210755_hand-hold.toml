@@ -1,0 +1,9 @@
+label = "hand-hold"
+note = "5 holds x 5 s, same pose, small move between"
+started = "2026-10-30T21:07:55+02:00"
+seconds = 40
+
+[stream]
+samples = 4131
+rate_hz = 104.160
+failures = []

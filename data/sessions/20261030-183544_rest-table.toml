@@ -1,0 +1,9 @@
+label = "rest-table"
+note = "flat on table, chip up, untouched"
+started = "2026-10-30T18:35:44+02:00"
+seconds = 60
+
+[stream]
+samples = 6243
+rate_hz = 104.196
+failures = []

@@ -1,0 +1,9 @@
+label = "pose-edge"
+note = "long edge"
+started = "2026-10-30T18:48:00+02:00"
+seconds = 20
+
+[stream]
+samples = 1993
+rate_hz = 104.171
+failures = []

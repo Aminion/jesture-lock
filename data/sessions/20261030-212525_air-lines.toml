@@ -1,0 +1,9 @@
+label = "air-lines"
+note = "in hand, ~20 cm lines: right, left, up, down, hold 1-2 s between, x2"
+started = "2026-10-30T21:25:25+02:00"
+seconds = 40
+
+[stream]
+samples = 4071
+rate_hz = 104.176
+failures = []
