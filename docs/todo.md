@@ -50,6 +50,8 @@ draws and converts to physical units.
 | `ruler-15` | 5 table slides of 15 cm, 2.1-3.3 s each | 143-156 mm (mean 149, -0.5%), v_end 10-36 mm/s, tilt error 0.05-0.12 deg: no scale error in the method; the +11% at 30 cm is unexplained (longer strokes, 0.5 deg turn, or overshoot) |
 | `air-lines` | ~20 cm lines in the air, hand holds between | per-hold gyro bias: tilt error 1.3-3.8 deg, v_end 140-570 mm/s; session bias: tilt error 0.4-1.0 deg, v_end 33-170 mm/s, strokes along clean directions (up/down within 25-51 mm of vertical) |
 | `peaks` | 20 s brisk gestures, 10 s max effort | gyro peak 182 dps (73% of 250), accel under 1.8 g (one 1.998 g sample when picking the board up); accel std per second up to 237 mg (brisk), 594 mg (max). Thin margin, so the firmware moved to +-4 g / 500 dps (quantization 0.122 mg, 17.5 mdps: still below the noise) |
+| `rest-table-4g` | 20 s on the table after the switch to +-4 g / 500 dps | gyro bias +1.82 -5.67 -0.24 dps; median accel noise per 1 s 0.9 mg (was 0.8) |
+| `tumble-4g` | 15 hand-held poses at +-4 g | offset x -4.3 y +5.5 z +25.1 mg (LSB -35 +45 +205), gain x 1.0093 y 0.9990 z 0.9947; \|a\| error 17.6 mg rms raw -> 1.4 mg fitted. Gains and the z offset agree with the +-2 g fit; x offset differs by 7 mg, x seen only from -0.73 to +0.74 (less constrained) |
 
 Design inputs for `docs/core.md`:
 - Accel calibration per board (3 offsets, 3 gains) from a tumble session, passed in at
@@ -70,22 +72,28 @@ Design inputs for `docs/core.md`:
 first implementation, another language may replace it later without changes to the Rust
 host or the firmware.
 
-1. [ ] `docs/core.md`, the ABI: opaque caller-owned state (size and alignment fixed in the
+1. [x] `docs/core.md`, the ABI: opaque caller-owned state (size and alignment fixed in the
    header, so the RAM budget is part of the contract), init, per-sample feed with `t_us`,
-   events (still / moving / stroke done), reading out the stroke path into a caller
-   buffer. Only C types cross it: fixed-width integers, fixed-layout structs, pointer +
+   events (ready / moving / stroke / rejected, with the state), reading out the stroke
+   path into a caller buffer. Only C types cross it: fixed-width integers, fixed-layout structs, pointer +
    length; no callbacks, no allocation.
 2. [ ] `docs/core.md`, the algorithm spec: fixed-point formats, rounding, saturation and
    order of operations, exact enough for a second implementation to match bit for bit.
-3. [ ] RAM budget for the stroke buffer: 104 Hz x 2 s x 3 x int32 is ~2.5 KB of 8 KB.
-   Options: fixed point count per stroke (downsampled), int16 positions, a stroke length
-   limit.
+   Drafted (streaming: look-back ring at the start, rewind to a snapshot at the end).
+   Freeze it after:
+   - [ ] `gesture-cli path` rewritten as a streaming float reference that follows the
+     text (config bias, causal still windows, ring replay, snapshot), and still giving
+     ruler-15 ~149 mm and air-lines tilt error 0.4-1 deg;
+   - [x] a tumble session at +-4 g (`tumble-4g`).
+3. [x] RAM budget: state 2048 B fixed in the header (ring 48 x 14 B, 64 points x 8 B as
+   int16 mm, halving the point rate when full).
 
 ### 3c: C++ implementation
 
 1. [ ] `core/`: still detection, rest calibration, tilt from the gyro, gravity removal,
-   double integration, zero-velocity correction. Integer only; no divide on the
-   per-sample path (M0+ has no hardware divide).
+   double integration, zero-velocity correction, as `docs/core.md`. Integer only; M0+ has
+   no hardware divide, so measure `gc_feed` on the board (worst case: the stroke-start
+   replay) against the 9.6 ms sample period.
 2. [ ] Conformance vectors as data files (raw recording in -> events and path out),
    checked through `core.h` only, so any implementation runs the same suite. Synthetic
    strokes (known path -> ideal IMU signals) plus real recordings.

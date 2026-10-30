@@ -1,0 +1,9 @@
+label = "tumble-4g"
+note = "~15 still poses, hand-held"
+started = "2026-10-30T22:03:45+02:00"
+seconds = 60
+
+[stream]
+samples = 6241
+rate_hz = 104.231
+failures = []
