@@ -32,10 +32,10 @@ inline constexpr std::uint8_t lsm6ds3_addr_sa0_low = 0x6A;
 
 // Read WHO_AM_I at the SA0-high address, then at SA0-low.
 // If neither answers, returns the most telling bus error (anything over a plain NACK).
-std::expected<Lsm6ds3Probe, I2cError> lsm6ds3_probe();
+[[nodiscard]] std::expected<Lsm6ds3Probe, I2cError> lsm6ds3_probe();
 
 // nullopt for any WHO_AM_I value outside the known variants.
-constexpr std::optional<Lsm6ds3Chip> lsm6ds3_chip(std::uint8_t who_am_i) {
+[[nodiscard]] constexpr std::optional<Lsm6ds3Chip> lsm6ds3_chip(std::uint8_t who_am_i) {
     switch (who_am_i) {
     case 0x69:
         return Lsm6ds3Chip::lsm6ds3;
@@ -62,7 +62,8 @@ struct Lsm6ds3Sample {
 inline constexpr std::size_t lsm6ds3_sample_bytes =
     2 * std::tuple_size_v<Lsm6ds3Axes> * sizeof(std::int16_t);
 
-constexpr Lsm6ds3Sample lsm6ds3_decode(std::span<const std::uint8_t, lsm6ds3_sample_bytes> raw) {
+[[nodiscard]] constexpr Lsm6ds3Sample
+lsm6ds3_decode(std::span<const std::uint8_t, lsm6ds3_sample_bytes> raw) {
     const auto axis = [raw](std::size_t i) {
         return proto::load_le<std::int16_t>(
             raw.subspan(i * sizeof(std::int16_t)).first<sizeof(std::int16_t)>());
@@ -80,9 +81,9 @@ inline constexpr std::uint8_t lsm6ds3_ctrl2_g = 0x40;  // ODR_G 104 Hz, FS_G +-2
 // sample is read; an unread sample keeps it high and later samples give no new edge.
 // Registers outside INT1_CTRL and CTRL1_XL..CTRL3_C keep their values across an MCU reset
 // (only a power cycle clears them).
-std::expected<void, I2cError> lsm6ds3_init(std::uint8_t addr);
+[[nodiscard]] std::expected<void, I2cError> lsm6ds3_init(std::uint8_t addr);
 
 // Latest sample if both sensors have new data since the last read (STATUS_REG), else nullopt.
-std::expected<std::optional<Lsm6ds3Sample>, I2cError> lsm6ds3_read(std::uint8_t addr);
+[[nodiscard]] std::expected<std::optional<Lsm6ds3Sample>, I2cError> lsm6ds3_read(std::uint8_t addr);
 
 } // namespace board

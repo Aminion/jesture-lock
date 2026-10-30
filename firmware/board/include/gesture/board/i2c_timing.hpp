@@ -50,7 +50,8 @@ inline constexpr I2cBusLimits i2c_fast_mode{.tr_max = 300'000,
 // tLOW = tSYNC1 + tSCLL and tHIGH = tSYNC2 + tSCLH; each tSYNC is credited with its
 // minimum, 2 x t_I2CCLK (RM0444 Tables 172/173 notes: tSYNC1 + tSYNC2 >= 4 x t_I2CCLK).
 // ST's own fast-mode rows need that credit.
-constexpr bool i2c_timing_ok(I2cTiming t, std::uint32_t i2cclk_hz, const I2cBusLimits& bus) {
+[[nodiscard]] constexpr bool i2c_timing_ok(I2cTiming t, std::uint32_t i2cclk_hz,
+                                           const I2cBusLimits& bus) {
     constexpr auto f4 = i2c_timing_field4_max;
     if (t.presc > f4 || t.scldel > f4 || t.sdadel > f4 || i2cclk_hz == 0) {
         return false;

@@ -18,11 +18,11 @@ inline constexpr std::uint32_t micros_hz = 1'000'000;
 void clock_init();
 
 // Milliseconds since clock_init(); wraps after ~49 days.
-std::uint32_t millis();
+[[nodiscard]] std::uint32_t millis();
 
 // Microseconds since clock_init() (TIM2 counter, 32 bits); wraps after ~71.6 min.
 // Safe to call from interrupts. This is the sample timestamp.
-std::uint32_t micros();
+[[nodiscard]] std::uint32_t micros();
 
 void delay_ms(std::uint32_t ms);
 

@@ -21,14 +21,15 @@ enum class I2cError : std::uint8_t {
 void i2c_init();
 
 // Write `data` to consecutive registers starting at `reg` (7-bit `addr`).
-std::expected<void, I2cError> i2c_write_regs(std::uint8_t addr, std::uint8_t reg,
-                                             std::span<const std::uint8_t> data);
+[[nodiscard]] std::expected<void, I2cError> i2c_write_regs(std::uint8_t addr, std::uint8_t reg,
+                                                           std::span<const std::uint8_t> data);
 
 // Read `out.size()` consecutive registers starting at `reg`: write reg, repeated START, read.
-std::expected<void, I2cError> i2c_read_regs(std::uint8_t addr, std::uint8_t reg,
-                                            std::span<std::uint8_t> out);
+[[nodiscard]] std::expected<void, I2cError> i2c_read_regs(std::uint8_t addr, std::uint8_t reg,
+                                                          std::span<std::uint8_t> out);
 
 // One register. (Writing one is i2c_write_regs(addr, reg, {value}).)
-std::expected<std::uint8_t, I2cError> i2c_read_reg(std::uint8_t addr, std::uint8_t reg);
+[[nodiscard]] std::expected<std::uint8_t, I2cError> i2c_read_reg(std::uint8_t addr,
+                                                                 std::uint8_t reg);
 
 } // namespace board
