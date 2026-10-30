@@ -112,6 +112,30 @@ impl Hello {
         let odr = ODR_MHZ.get(code.checked_sub(1)?)?;
         Some(US_X_MHZ / odr)
     }
+
+    /// Accelerometer sensitivity from FS_XL[1:0] in CTRL1_XL, ug/LSB (LSM6DS3 datasheet,
+    /// LA_So). `None` if the accelerometer is not configured.
+    pub fn accel_ug_per_lsb(&self) -> Option<u32> {
+        // FS_XL codes 00: +-2 g, 01: +-16 g, 10: +-4 g, 11: +-8 g.
+        const UG: [u32; 4] = [61, 488, 122, 244];
+        (self.ctrl1_xl != 0).then(|| UG[usize::from((self.ctrl1_xl >> 2) & 0b11)])
+    }
+
+    /// Gyro sensitivity from FS_G[1:0] and FS_125 in CTRL2_G, mdps/LSB times 1000
+    /// (LSM6DS3 datasheet, G_So). `None` if the gyro is not configured.
+    pub fn gyro_udps_per_lsb(&self) -> Option<u32> {
+        // FS_G codes 00: 250, 01: 500, 10: 1000, 11: 2000 dps; FS_125 overrides them.
+        const UDPS: [u32; 4] = [8_750, 17_500, 35_000, 70_000];
+        const FS_125: u8 = 0b10;
+        const UDPS_125: u32 = 4_375;
+        if self.ctrl2_g == 0 {
+            None
+        } else if self.ctrl2_g & FS_125 != 0 {
+            Some(UDPS_125)
+        } else {
+            Some(UDPS[usize::from((self.ctrl2_g >> 2) & 0b11)])
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -406,6 +430,25 @@ mod tests {
         assert_eq!(hello(0x80).sample_period_us(), Some(602)); // 1.66 kHz
         assert_eq!(hello(0x00).sample_period_us(), None); // power down
         assert_eq!(hello(0x90).sample_period_us(), None); // not a gyro ODR
+    }
+
+    #[test]
+    fn sensitivity() {
+        let hello = |ctrl1_xl, ctrl2_g| Hello {
+            fw: Firmware::Stream,
+            imu: ImuStatus::Ok,
+            imu_addr: 0x6B,
+            who_am_i: 0x69,
+            ctrl1_xl,
+            ctrl2_g,
+        };
+        let scales = |h: Hello| (h.accel_ug_per_lsb(), h.gyro_udps_per_lsb());
+        assert_eq!(scales(hello(0x40, 0x40)), (Some(61), Some(8_750))); // +-2 g, 250 dps
+        assert_eq!(scales(hello(0x44, 0x44)), (Some(488), Some(17_500))); // +-16 g, 500 dps
+        assert_eq!(scales(hello(0x48, 0x48)), (Some(122), Some(35_000))); // +-4 g, 1000 dps
+        assert_eq!(scales(hello(0x4C, 0x4C)), (Some(244), Some(70_000))); // +-8 g, 2000 dps
+        assert_eq!(scales(hello(0x40, 0x42)), (Some(61), Some(4_375))); // 125 dps
+        assert_eq!(scales(hello(0, 0)), (None, None));
     }
 
     // Unknown types are skipped, including Event (type 4, layout TBD).

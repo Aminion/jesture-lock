@@ -57,6 +57,9 @@ Flash one or the other. Results of both paths on the same recording must match b
 - Firmware: `cmake --preset firmware && cmake --build --preset firmware`
 - Host tests: `cmake --preset host && cmake --build --preset host && ctest --preset host`
 - Rust (run in `host/`): `cargo test`, `cargo clippy -- -D warnings`, `cargo fmt`
+- Record and analyze (in `host/`): `cargo run -q -p gesture-cli -- record <label> --seconds N
+  --note "..."`, then `stats`, `timeline`, `calib`, `path <file> --calib <tumble.bin>` on
+  `../data/sessions/*.bin`
 
 ## Rules
 - `core/` has no I/O, no platform code, no clock access, no global state.
