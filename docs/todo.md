@@ -95,10 +95,18 @@ host or the firmware.
 1. [ ] `core/`: still detection, rest calibration, tilt from the gyro, gravity removal,
    double integration, zero-velocity correction, as `docs/core.md`. Integer only; M0+ has
    no hardware divide, so measure `gc_feed` on the board (worst case: the stroke-start
-   replay) against the 9.6 ms sample period.
+   replay) against the 9.6 ms sample period (16 MHz; 64-bit multiplies and `rdiv` are
+   library calls). If it does not fit: shifts for power-of-two divisors, spreading the
+   replay, or the PLL (64 MHz). State: ring 48 x 14 B, points 64 x 8 B, the rest ~300 B,
+   ~1.5 KB of the 2048 B `GC_STATE_SIZE`.
 2. [ ] Conformance vectors as data files (raw recording in -> events and path out),
    checked through `core.h` only, so any implementation runs the same suite. Synthetic
    strokes (known path -> ideal IMU signals) plus real recordings.
+   Config defaults (hand, +-4 g / 500 dps; from the measurements above): still gyro std
+   171 LSB (3 dps), accel std 123 (15 mg), gyro rate 229 (4 dps); table preset 29 / 25 /
+   57 (0.5 dps, 3 mg, 1 dps); hold_n 20; bias update 11 (0.2 dps), 16 (2 mg); clip 32700;
+   max_dt 14423 us; stroke 150000..4000000 us; min extent 20 mm; max v_end 300 mm/s;
+   calibration from `tumble-4g`, bias from `rest-table-4g`.
 3. [ ] Build: the `gesture-core` build.rs and the firmware link "a static lib
    `gesture_core` providing `core.h`"; the implementation is one build option.
 
