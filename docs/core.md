@@ -10,14 +10,14 @@ link time without changes to the firmware or the host. An implementation conform
 gives the same events and the same stroke points, bit for bit, on the conformance vectors
 (Step 3c), run through `core.h` only.
 
-ABI version: **1** (draft, Step 3b). Scope of v0: still detection, tilt from the gyro,
+ABI version: **1**. Scope of v1: still detection, tilt from the gyro,
 gravity removal, double integration and the zero-velocity correction, giving the 3D path of
 one stroke. Recognition comes later, in a new ABI version.
 
-Status: the ABI and the conventions are meant to hold. The algorithm section is a draft:
-its numbers are fixed only after a streaming version of the float reference
-(`gesture-cli path`) follows this text and still reproduces the measurements in
-`docs/todo.md` (ruler-15 ~149 mm, air-lines tilt error 0.4-1 deg).
+Status: frozen (2026-10-30). The streaming float reference (`gesture-cli path`) follows the
+algorithm section and reproduces the measurements in `docs/todo.md` (ruler-15 142-155 mm,
+air-lines tilt error 0.10-1.20 deg). Any change to a layout, a constant or a formula is a
+new ABI version; the config values (calibration, thresholds) are not part of the spec.
 
 ## Conventions
 - Only C types cross the ABI: fixed-width integers and structs of them with the layout
@@ -45,6 +45,7 @@ typedef struct { _Alignas(8) uint8_t opaque[GC_STATE_SIZE]; } gc_state;
 gc_status gc_init(gc_state *s, const gc_config *cfg);
 gc_event  gc_feed(gc_state *s, const gc_sample *in);
 uint16_t  gc_stroke(const gc_state *s, gc_stroke_info *info, gc_point *out, uint16_t cap);
+uint16_t  gc_live(const gc_state *s, gc_point *out);
 ```
 
 - `gc_init` validates `cfg`, copies it into the state and resets everything. On an error
@@ -55,6 +56,12 @@ uint16_t  gc_stroke(const gc_state *s, gc_stroke_info *info, gc_point *out, uint
 - `gc_stroke` reads the last stroke after a `GC_EV_STROKE` event, until the next
   `GC_EV_MOVING`. It fills `info`, copies `min(points, cap)` points to `out` and returns
   that number; it returns 0 (and fills `info` with zeros) when no stroke is readable.
+- `gc_live` reads where the stroke is now, for drawing it while it is drawn: in state
+  `MOVING` it writes the position after the latest integrated sample to `out` and returns
+  1; otherwise it writes zeros and returns 0. The position is uncorrected (the
+  zero-velocity correction needs the end of the stroke), so it drifts, and the points
+  from `gc_stroke` differ from it by up to v_end x T / 2; a viewer replaces the live
+  path with them at `GC_EV_STROKE`. It changes nothing in the state.
 
 ### `gc_sample` (16 B)
 
@@ -178,7 +185,7 @@ path; leveling and a heading convention move into core with recognition.
 | 20     | uint16   | extent_mm    | largest abs coordinate over the points |
 | 22     | uint16   | step         | samples per point at the end (1, 2, 4, ...) |
 
-## Algorithm (draft)
+## Algorithm
 
 ### Arithmetic
 - All values are integers. Intermediate products use 64-bit signed integers; the ranges
@@ -265,6 +272,8 @@ At sample k (first non-quiet window), with ring indices relative to k:
 - sample counter c + 1; if c is a multiple of step, store a point: `x_mm = sat16(rdiv(p, 10^6))`,
   `t_100us = satu16(rdiv(t - t_s0, 100))`. A full buffer first keeps points 0, 2, 4, ...
   (32 left) and doubles step; then the multiple-of-step test is repeated.
+- `gc_live` gives the same rounding of the current p and t as a stored point, whether or
+  not this sample was stored.
 
 ### Stroke end (at the snapshot)
 - T = t_snap - t_s0; drop points with t_100us > rdiv(T, 100); append the snapshot point
@@ -288,8 +297,6 @@ products < 2^60 for |f - g| < 32 g, position products < 2^48 for |v| < 10 m/s.
   To measure on the board in Step 3c; if it does not fit: shifts for power-of-two
   divisors, spreading the replay, or the PLL (64 MHz).
 
-## Open
-- Streaming float reference following this text (blocks the algorithm numbers).
-- Tumble calibration at +-4 g (blocks conformance configs from new recordings).
+## Later (a new ABI version)
 - Adaptive still thresholds (measure the noise in the hold) instead of the two presets.
 - Leveled output frame and heading, with recognition.

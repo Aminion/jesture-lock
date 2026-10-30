@@ -77,10 +77,9 @@ host or the firmware.
    events (ready / moving / stroke / rejected, with the state), reading out the stroke
    path into a caller buffer. Only C types cross it: fixed-width integers, fixed-layout structs, pointer +
    length; no callbacks, no allocation.
-2. [ ] `docs/core.md`, the algorithm spec: fixed-point formats, rounding, saturation and
+2. [x] `docs/core.md`, the algorithm spec (frozen 2026-10-30): fixed-point formats, rounding, saturation and
    order of operations, exact enough for a second implementation to match bit for bit.
-   Drafted (streaming: look-back ring at the start, rewind to a snapshot at the end).
-   Freeze it after:
+   Streaming: look-back ring at the start, rewind to a snapshot at the end. Frozen after:
    - [x] `gesture-cli path` rewritten as a streaming float reference that follows the
      text (config bias, causal still windows, ring replay, snapshot). With the +-2 g
      tumble and rest-table bias: ruler-15 142-155 mm (mean 148), tilt error 0.02-0.06
@@ -117,6 +116,8 @@ UI (`viewer`, egui):
 1. [ ] Live input: open the serial port, decode with the `protocol` crate.
 2. [ ] State indicator: still (calibrating / ready) or moving.
 3. [ ] Stroke capture from moving to the next still; the last stroke stays until the next.
+   While moving, draw the live path (`gc_live`, uncorrected); at `STROKE` replace it with
+   the corrected points, so the jump shows the drift.
 4. [ ] 3D view on the 2D egui `Painter`, our own projection (no 3D library):
    - orbit with mouse drag, zoom with scroll, front/top/side presets;
    - axes: up from gravity, forward = board heading at the stroke start (no magnetometer);
