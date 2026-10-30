@@ -50,8 +50,8 @@ struct Segment {
 
 /// Offset (g) and gain per axis: true = (raw - offset) * gain.
 pub struct Fit {
-    offset: V3,
-    gain: V3,
+    pub offset: V3,
+    pub gain: V3,
 }
 
 impl Fit {

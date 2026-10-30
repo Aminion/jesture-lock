@@ -81,9 +81,12 @@ host or the firmware.
    order of operations, exact enough for a second implementation to match bit for bit.
    Drafted (streaming: look-back ring at the start, rewind to a snapshot at the end).
    Freeze it after:
-   - [ ] `gesture-cli path` rewritten as a streaming float reference that follows the
-     text (config bias, causal still windows, ring replay, snapshot), and still giving
-     ruler-15 ~149 mm and air-lines tilt error 0.4-1 deg;
+   - [x] `gesture-cli path` rewritten as a streaming float reference that follows the
+     text (config bias, causal still windows, ring replay, snapshot). With the +-2 g
+     tumble and rest-table bias: ruler-15 142-155 mm (mean 148), tilt error 0.02-0.06
+     deg; air-lines 8 strokes in the drawn directions, tilt error 0.10-1.20 deg (6 of 8
+     under 0.25), v_end 64-249 mm/s; ruler-30 slides over 4 s are rejected LONG
+     (max_stroke_us), the other 3 give 302-363 mm;
    - [x] a tumble session at +-4 g (`tumble-4g`).
 3. [x] RAM budget: state 2048 B fixed in the header (ring 48 x 14 B, 64 points x 8 B as
    int16 mm, halving the point rate when full).

@@ -55,6 +55,15 @@ pub fn mean(v: &[V3]) -> V3 {
     std::array::from_fn(|i| v.iter().map(|x| x[i]).sum::<f64>() / n)
 }
 
+/// Per-axis median (upper middle for an even count).
+pub fn median(v: &[V3]) -> V3 {
+    std::array::from_fn(|i| {
+        let mut axis: Vec<f64> = v.iter().map(|x| x[i]).collect();
+        axis.sort_by(f64::total_cmp);
+        axis[axis.len() / 2]
+    })
+}
+
 pub fn std_dev(v: &[V3]) -> V3 {
     let m = mean(v);
     let n = v.len() as f64;
@@ -298,11 +307,7 @@ pub fn timeline(rec: &Recording, window_s: f64) -> anyhow::Result<String> {
         .iter()
         .map(|&k| mean(&s.gyro[k..k + window]))
         .collect();
-    let bias: V3 = std::array::from_fn(|i| {
-        let mut v: Vec<f64> = gyro_means.iter().map(|m| m[i]).collect();
-        v.sort_by(f64::total_cmp);
-        v[v.len() / 2]
-    });
+    let bias = median(&gyro_means);
     let max = |v: V3| v.into_iter().fold(0.0, f64::max);
 
     let mut out = String::new();
