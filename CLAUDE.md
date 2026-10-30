@@ -28,7 +28,14 @@ Flash one or the other. Results of both paths on the same recording must match b
   `WHO_AM_I`; never hardcode 0x69 as the only valid value.
 
 ## Structure
-- `core/`: pure recognition core (C++) plus a C ABI. Builds for host and MCU.
+- `core/`: pure recognition core (C++) plus a C ABI. Builds for host and MCU. All motion
+  math goes here (still detection, sensor fusion, stroke path, recognition), never in the
+  viewer or the firmware apps.
+  `gesture/core.h` is a contract between languages, like the wire format: specified in
+  `docs/core.md` (ABI plus bit-exact algorithm spec), checked by conformance vectors run
+  through `core.h` only. The C++ code is the first implementation; another language may
+  replace it, so the Rust host and the firmware see `core.h` and nothing else, and the
+  caller owns the state (size fixed in the header).
 - `proto/`: protocol framing (COBS, CRC16), no hardware dependencies. Builds for host and MCU;
   `host/crates/protocol` mirrors it.
 - `firmware/board/`: clocks, pins, I2C/UART/LSM6DS3 drivers. Register-free logic (ring buffer,
@@ -39,7 +46,8 @@ Flash one or the other. Results of both paths on the same recording must match b
 - C++ public headers use one prefix: `gesture/core.h`, `gesture/proto/`, `gesture/board/`,
   `gesture/test/`.
 - `host/`: Rust workspace: `protocol`, `gesture-core` (FFI), `gesture-cli`, `viewer`.
-- `docs/`: `protocol.md` (the C++/Rust contract), `template_format.md`, `pinout.md` (MCU pins and IMU wiring),
+- `docs/`: `protocol.md` (the C++/Rust contract), `core.md` (the `core.h` contract, Step 3b),
+  `template_format.md`, `pinout.md` (MCU pins and IMU wiring),
   `todo.md` (current step plan, deferred adjustments),
   `datasheets/` (vendor PDFs, gitignored; manifest + checksums committed).
 - `data/`: recorded sessions.
@@ -58,6 +66,7 @@ Flash one or the other. Results of both paths on the same recording must match b
   Physical units (g, deg/s) are for the viewer only.
 - Time comes from the MCU, never from the PC receive time.
 - Protocol changes: update `docs/protocol.md` first, then both sides.
+- `core.h` changes: update `docs/core.md` first, then the implementation and the FFI.
 - List source files explicitly in CMake. `git add` new files (flakes ignore untracked ones).
 - Check register usage against RM0444. Vendor docs: `docs/datasheets/` (local PDFs + `.txt`
   copies, see its README); grep the `.txt` instead of fetching from the web.
