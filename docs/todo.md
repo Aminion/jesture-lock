@@ -23,14 +23,20 @@ Deferred adjustments, with the numbers that motivated them.
 
 Measured 2026-10-29 (`stream` firmware bring-up, `drdy` line): sample period 9600 us, latency from
 INT1 edge to sample read up to 7.5 ms, so about 2 ms left before a sample is lost.
-None of this uses DMA yet (`stm32g0xx_ll_dma.c` is built but unused).
 
-- **UART TX by DMA.** Today `uart_write` blocks ~87 us per byte (115200 baud), ~5 ms per
-  text line. Fill a buffer, start DMA1 (route through DMAMUX), return. Needs the buffer to stay
-  untouched until the transfer ends: two frame-sized buffers (2 x 32-64 B), count the RAM.
-  Do it after step 2b, once frames are binary; `Status.missed` shows the gain.
-- **I2C at 400 kHz.** One sample read (STATUS + 12 bytes) takes ~1.9 ms at 100 kHz,
-  ~0.5 ms at 400 kHz. New TIMINGR value (RM0444 Table 173, fast mode) plus a fast-mode
-  variant of `i2c_timing_standard_mode_ok`, with its host tests.
+Done 2026-10-30: I2C at 400 kHz (RM0444 Table 173 fast-mode timing, `i2c_timing_ok` checks
+Sm and Fm) and UART TX by DMA (DMA1 channel 1, two 64 B buffers, +136 B RAM). Worst case over
+~20 s with temporary SWD-read maxima in `poll_imu`:
+
+| build                      | INT1 edge -> sample read | edge -> Sample frame queued |
+|----------------------------|--------------------------|-----------------------------|
+| 100 kHz, blocking TX       | 3577 us                  | 5718 us                     |
+| 400 kHz, blocking TX       | 2583 us                  | 4725 us                     |
+| 400 kHz, DMA TX            | 751 us                   | 1006 us                     |
+
+`gesture-cli check --seconds 60`: 0 errors, `missed` 0 before and after (no loss at 104 Hz
+either way; the gain is headroom). The pull-ups on the GY module set the SCL/SDA rise time,
+which may exceed the 300 ns fast-mode limit; no I2C errors seen so far.
+
 - **I2C RX by DMA.** Only if the CPU must be free during the read; low value after 400 kHz.
 - UART RX stays interrupt-driven: the PC sends little.

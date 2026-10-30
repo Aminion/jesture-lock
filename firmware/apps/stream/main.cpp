@@ -125,7 +125,7 @@ int main() {
     }
 
     // Hello and Status once per second, at most one of them per loop pass: with a Sample
-    // and the I2C read that is ~6 ms, under the 9.6 ms sample period.
+    // that is at most 50 B, one 64 B UART TX buffer, so the pass does not block on TX.
     constexpr std::uint32_t tick_ms = 125;
     constexpr std::uint32_t ticks_per_second = 8;
     std::uint32_t last_tick = board::millis();

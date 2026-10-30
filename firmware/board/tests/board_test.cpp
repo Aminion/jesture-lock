@@ -33,37 +33,64 @@ static_assert(!board::uart_baud_ok(40'000'000)); // BRR rounds to 0
 
 // --- I2C timing (compile time) -------------------------------------------------
 
-// RM0444 Rev 6 Table 173 (16 MHz) and Table 172 (8 MHz), standard mode.
-constexpr board::I2cTiming sm100k_16mhz = board::i2c_timing_100khz_16mhz;
-constexpr board::I2cTiming sm10k_16mhz{
-    .presc = 3, .scldel = 4, .sdadel = 2, .sclh = 0xC3, .scll = 0xC7};
-constexpr board::I2cTiming sm100k_8mhz{
-    .presc = 1, .scldel = 4, .sdadel = 2, .sclh = 0x0F, .scll = 0x13};
+using board::i2c_fast_mode;
+using board::i2c_standard_mode;
+using board::i2c_timing_ok;
+using board::I2cTiming;
 
-static_assert(board::i2c_timing_standard_mode_ok(sm100k_16mhz, 16'000'000));
-static_assert(board::i2c_timing_standard_mode_ok(sm10k_16mhz, 16'000'000));
-static_assert(board::i2c_timing_standard_mode_ok(sm100k_8mhz, 8'000'000));
+// RM0444 Rev 6 Table 173 (16 MHz) and Table 172 (8 MHz).
+constexpr I2cTiming sm100k_16mhz{.presc = 3, .scldel = 4, .sdadel = 2, .sclh = 0x0F, .scll = 0x13};
+constexpr I2cTiming sm10k_16mhz{.presc = 3, .scldel = 4, .sdadel = 2, .sclh = 0xC3, .scll = 0xC7};
+constexpr I2cTiming sm100k_8mhz{.presc = 1, .scldel = 4, .sdadel = 2, .sclh = 0x0F, .scll = 0x13};
+constexpr I2cTiming fm400k_16mhz = board::i2c_timing_400khz_16mhz;
+constexpr I2cTiming fm400k_8mhz{.presc = 0, .scldel = 3, .sdadel = 1, .sclh = 0x03, .scll = 0x09};
 
-consteval board::I2cTiming with(board::I2cTiming t, auto field, std::uint8_t v) {
+static_assert(i2c_timing_ok(sm100k_16mhz, 16'000'000, i2c_standard_mode));
+static_assert(i2c_timing_ok(sm10k_16mhz, 16'000'000, i2c_standard_mode));
+static_assert(i2c_timing_ok(sm100k_8mhz, 8'000'000, i2c_standard_mode));
+static_assert(i2c_timing_ok(fm400k_16mhz, 16'000'000, i2c_fast_mode));
+static_assert(i2c_timing_ok(fm400k_8mhz, 8'000'000, i2c_fast_mode));
+// Fast-mode timing is too fast for standard mode, and standard-mode hold too long for fast.
+static_assert(!i2c_timing_ok(fm400k_16mhz, 16'000'000, i2c_standard_mode));
+static_assert(!i2c_timing_ok(sm100k_16mhz, 16'000'000, i2c_fast_mode));
+
+consteval I2cTiming with(I2cTiming t, auto field, std::uint8_t v) {
     t.*field = v;
     return t;
 }
 // Each limit on its own: one step past it fails.
-static_assert(!board::i2c_timing_standard_mode_ok(sm100k_16mhz, 32'000'000)); // all halved
-static_assert(!board::i2c_timing_standard_mode_ok(with(sm100k_16mhz, &board::I2cTiming::scldel, 3),
-                                                  16'000'000)); // setup 1000 ns < 1250
-static_assert(!board::i2c_timing_standard_mode_ok(with(sm100k_16mhz, &board::I2cTiming::sdadel, 0),
-                                                  16'000'000)); // hold 0 < 62.5 ns
-static_assert(!board::i2c_timing_standard_mode_ok(with(sm100k_16mhz, &board::I2cTiming::sdadel, 8),
-                                                  16'000'000)); // hold 2 us > 1.94 us
-static_assert(!board::i2c_timing_standard_mode_ok(with(sm100k_16mhz, &board::I2cTiming::scll, 0x11),
-                                                  16'000'000)); // tLOW 4.5 us < 4.7
-static_assert(!board::i2c_timing_standard_mode_ok(with(sm100k_16mhz, &board::I2cTiming::sclh, 0x0E),
-                                                  16'000'000)); // tHIGH 3.75 us < 4.0
-static_assert(!board::i2c_timing_standard_mode_ok(with(sm100k_16mhz, &board::I2cTiming::presc,
-                                                       board::i2c_timing_field4_max + 1),
-                                                  16'000'000)); // PRESC is 4 bits
-static_assert(!board::i2c_timing_standard_mode_ok(sm100k_16mhz, 0));
+// Standard mode, 16 MHz: t_I2CCLK 62.5 ns, t_PRESC 250 ns, tSYNC credit 125 ns.
+static_assert(!i2c_timing_ok(sm100k_16mhz, 32'000'000, i2c_standard_mode)); // all halved
+static_assert(!i2c_timing_ok(with(sm100k_16mhz, &I2cTiming::scldel, 3), 16'000'000,
+                             i2c_standard_mode)); // setup 1000 ns < 1250
+static_assert(!i2c_timing_ok(with(sm100k_16mhz, &I2cTiming::sdadel, 0), 16'000'000,
+                             i2c_standard_mode)); // hold 0 < 62.5 ns
+static_assert(i2c_timing_ok(with(sm100k_16mhz, &I2cTiming::sdadel, 11), 16'000'000,
+                            i2c_standard_mode)); // hold 2.75 us <= 2.94 us
+static_assert(!i2c_timing_ok(with(sm100k_16mhz, &I2cTiming::sdadel, 12), 16'000'000,
+                             i2c_standard_mode)); // hold 3 us > 2.94 us
+static_assert(!i2c_timing_ok(with(sm100k_16mhz, &I2cTiming::scll, 0x11), 16'000'000,
+                             i2c_standard_mode)); // tLOW 4.625 us < 4.7
+static_assert(!i2c_timing_ok(with(sm100k_16mhz, &I2cTiming::sclh, 0x0E), 16'000'000,
+                             i2c_standard_mode)); // tHIGH 3.875 us < 4.0
+static_assert(!i2c_timing_ok(with(sm100k_16mhz, &I2cTiming::presc,
+                                  board::i2c_timing_field4_max + 1),
+                             16'000'000, i2c_standard_mode)); // PRESC is 4 bits
+static_assert(!i2c_timing_ok(sm100k_16mhz, 0, i2c_standard_mode));
+// Fast mode, 16 MHz: t_PRESC 125 ns.
+static_assert(!i2c_timing_ok(fm400k_16mhz, 32'000'000, i2c_fast_mode)); // all halved
+static_assert(!i2c_timing_ok(with(fm400k_16mhz, &I2cTiming::scldel, 2), 16'000'000,
+                             i2c_fast_mode)); // setup 375 ns < 400
+static_assert(!i2c_timing_ok(with(fm400k_16mhz, &I2cTiming::sdadel, 0), 16'000'000,
+                             i2c_fast_mode)); // hold 0 < 62.5 ns
+static_assert(i2c_timing_ok(with(fm400k_16mhz, &I2cTiming::sdadel, 3), 16'000'000,
+                            i2c_fast_mode)); // hold 375 ns <= 390 ns
+static_assert(!i2c_timing_ok(with(fm400k_16mhz, &I2cTiming::sdadel, 4), 16'000'000,
+                             i2c_fast_mode)); // hold 500 ns > 390 ns
+static_assert(!i2c_timing_ok(with(fm400k_16mhz, &I2cTiming::scll, 0x08), 16'000'000,
+                             i2c_fast_mode)); // tLOW 1.25 us < 1.3
+static_assert(!i2c_timing_ok(with(fm400k_16mhz, &I2cTiming::sclh, 0x02), 16'000'000,
+                             i2c_fast_mode)); // tHIGH 500 ns < 600
 
 // --- LSM6DS3 WHO_AM_I (compile time) -------------------------------------------
 

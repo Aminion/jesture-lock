@@ -1,7 +1,7 @@
 #pragma once
 
 // I2C master on LL, blocking register read/write.
-// I2C1: SCL PA9 (D5), SDA PA10 (D4), AF6; 100 kHz from PCLK = 16 MHz.
+// I2C1: SCL PA9 (D5), SDA PA10 (D4), AF6; 400 kHz (fast mode) from PCLK = 16 MHz.
 // Pull-ups are on the IMU module. Needs clock_init() first (timeouts use millis()).
 
 #include <cstdint>

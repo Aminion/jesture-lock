@@ -1,7 +1,8 @@
 #pragma once
 
 // USART2 to the ST-LINK virtual COM port: TX PA2, RX PA3, AF1, 8N1.
-// Blocking TX; RX by interrupt into a 64-byte ring, drained with uart_read().
+// TX by DMA from two 64-byte buffers; RX by interrupt into a 64-byte ring, drained with
+// uart_read().
 // G031 USART2 is the basic variant (RM0444 Table 183): no FIFO, no prescaler,
 // kernel clock is always PCLK = 16 MHz.
 
@@ -49,7 +50,8 @@ constexpr bool uart_baud_ok(std::uint32_t baud) {
 // Uses uart_brr(); check `baud` with uart_baud_ok() at compile time.
 void uart_init(std::uint32_t baud);
 
-// Blocks until the last byte is handed to the transmitter (it may still be on the wire).
+// Copies `data` into a TX buffer and returns; DMA sends it in the background. Blocks only
+// while both buffers are full, until the one on the wire is sent (~5.6 ms for 64 B).
 void uart_write(std::span<const std::uint8_t> data);
 
 // Next received byte, nullopt if the ring is empty. Never blocks.

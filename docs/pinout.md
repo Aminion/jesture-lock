@@ -17,7 +17,7 @@ Keep this file in sync with the code: change a pin there, change it here in the 
 | CS      | -             | -       | -    | high on module: I2C mode         | |
 | SDO/SA0 | -             | -       | -    | high on module: address 0x6B     | |
 
-- I2C1 at 100 kHz, open-drain, pull-ups on the module (no internal pull-ups).
+- I2C1 at 400 kHz (fast mode), open-drain, pull-ups on the module (no internal pull-ups).
 - Detected chip: WHO_AM_I 0x69 (LSM6DS3) at 0x6B. Firmware also probes 0x6A and
   accepts 0x69/0x6A/0x6C (see `firmware/board/src/lsm6ds3.cpp`).
 

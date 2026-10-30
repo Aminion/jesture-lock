@@ -21,21 +21,22 @@ constexpr std::uint32_t sda_pin = board::pins::i2c_sda;
 // Kernel clock: RCC_CCIPR.I2C1SEL reset value = PCLK.
 constexpr std::uint32_t i2cclk_hz = board::pclk_hz;
 
-constexpr board::I2cTiming timing = board::i2c_timing_100khz_16mhz;
+constexpr board::I2cTiming timing = board::i2c_timing_400khz_16mhz;
 static_assert(i2cclk_hz == 16'000'000, "timing is from the 16 MHz table");
-static_assert(board::i2c_timing_standard_mode_ok(timing, i2cclk_hz));
+static_assert(board::i2c_timing_ok(timing, i2cclk_hz, board::i2c_fast_mode));
 constexpr std::uint32_t timingr =
     __LL_I2C_CONVERT_TIMINGS(timing.presc, timing.scldel, timing.sdadel, timing.sclh, timing.scll);
-static_assert(timingr == 0x3042'0F13, "RM0444 Rev 6 Table 173");
+static_assert(timingr == 0x1032'0309, "RM0444 Rev 6 Table 173");
 
-// Per flag wait; one byte takes ~0.1 ms at 100 kHz.
+// Per flag wait; one byte takes ~25 us at 400 kHz.
 constexpr std::uint32_t timeout_ms = 5;
 
 constexpr std::size_t max_nbytes = 255;
 
-// Half an SCL period.
-constexpr std::uint32_t half_bit_us = board::micros_hz / (2 * board::i2c_scl_hz);
-static_assert(half_bit_us * 2 * board::i2c_scl_hz == board::micros_hz);
+// Bus clear clocks at standard-mode speed, slow enough for any slave and any pull-up.
+constexpr std::uint32_t bus_clear_hz = 100'000;
+constexpr std::uint32_t half_bit_us = board::micros_hz / (2 * bus_clear_hz);
+static_assert(half_bit_us * 2 * bus_clear_hz == board::micros_hz);
 void half_bit_delay() {
     board::delay_us(half_bit_us);
 }
