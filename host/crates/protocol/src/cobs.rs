@@ -1,4 +1,4 @@
-//! COBS encode/decode, same canonical encoding as `proto/include/proto/cobs.hpp`.
+//! COBS encode/decode, same canonical encoding as `proto/include/gesture/proto/cobs.hpp`.
 //! The encoded bytes contain no 0x00; the 0x00 delimiter is not part of them.
 //!
 //! Canonical encoding: a run of 254 non-zero bytes that ends the input gets no extra empty
