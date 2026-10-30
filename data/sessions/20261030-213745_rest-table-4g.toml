@@ -1,0 +1,9 @@
+label = "rest-table-4g"
+note = "flat on the table, chip up, after switch to +-4 g / 500 dps"
+started = "2026-10-30T21:37:45+02:00"
+seconds = 20
+
+[stream]
+samples = 2026
+rate_hz = 104.207
+failures = []

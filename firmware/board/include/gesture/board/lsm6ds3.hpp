@@ -49,7 +49,7 @@ inline constexpr std::uint8_t lsm6ds3_addr_sa0_low = 0x6A;
 }
 
 // One accelerometer + gyroscope reading, raw LSB, axes as printed on the chip.
-// 104 Hz, +-2 g (0.061 mg/LSB, 1 g ~ 16393), +-250 dps (8.75 mdps/LSB).
+// 104 Hz, +-4 g (0.122 mg/LSB, 1 g ~ 8197), +-500 dps (17.5 mdps/LSB).
 using Lsm6ds3Axes = std::array<std::int16_t, 3>; // x, y, z
 
 struct Lsm6ds3Sample {
@@ -73,10 +73,10 @@ lsm6ds3_decode(std::span<const std::uint8_t, lsm6ds3_sample_bytes> raw) {
 
 // What lsm6ds3_init() configures; Hello reports the two registers (docs/protocol.md).
 inline constexpr std::uint32_t lsm6ds3_odr_hz = 104;
-inline constexpr std::uint8_t lsm6ds3_ctrl1_xl = 0x40; // ODR_XL 104 Hz, FS_XL +-2 g
-inline constexpr std::uint8_t lsm6ds3_ctrl2_g = 0x40;  // ODR_G 104 Hz, FS_G +-250 dps
+inline constexpr std::uint8_t lsm6ds3_ctrl1_xl = 0x48; // ODR_XL 104 Hz, FS_XL +-4 g (10)
+inline constexpr std::uint8_t lsm6ds3_ctrl2_g = 0x44;  // ODR_G 104 Hz, FS_G +-500 dps (01)
 
-// Both sensors at 104 Hz, +-2 g, +-250 dps, block data update on, gyro data ready on INT1.
+// Both sensors at 104 Hz, +-4 g, +-500 dps, block data update on, gyro data ready on INT1.
 // INT1 is level, not a pulse (AN4650 3.3): it goes high with a new sample and low when the
 // sample is read; an unread sample keeps it high and later samples give no new edge.
 // Registers outside INT1_CTRL and CTRL1_XL..CTRL3_C keep their values across an MCU reset

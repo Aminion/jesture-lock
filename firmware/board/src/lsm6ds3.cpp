@@ -14,8 +14,8 @@ constexpr std::uint8_t reg_status = 0x1E;
 constexpr std::uint8_t reg_outx_l_g = 0x22;
 
 constexpr std::uint8_t odr_104hz = 0b0100 << 4U; // ODR_XL / ODR_G, Tables 47 and 51
-constexpr std::uint8_t fs_xl_2g = 0b00 << 2U;
-constexpr std::uint8_t fs_g_250dps = 0b00 << 2U;
+constexpr std::uint8_t fs_xl_4g = 0b10 << 2U;    // FS_XL: 00 2 g, 01 16 g, 10 4 g, 11 8 g
+constexpr std::uint8_t fs_g_500dps = 0b01 << 2U; // FS_G: 00 250, 01 500, 10 1000, 11 2000 dps
 constexpr std::uint8_t ctrl3_bdu = 1U << 6U;
 constexpr std::uint8_t ctrl3_if_inc = 1U << 2U;
 // With equal ODRs DRDY_G comes after DRDY_XL, so it means both are ready (AN4650 3.1).
@@ -23,8 +23,8 @@ constexpr std::uint8_t int1_drdy_g = 1U << 1U;
 constexpr std::uint8_t status_xlda = 1U << 0U;
 constexpr std::uint8_t status_gda = 1U << 1U;
 
-static_assert(board::lsm6ds3_ctrl1_xl == (odr_104hz | fs_xl_2g));
-static_assert(board::lsm6ds3_ctrl2_g == (odr_104hz | fs_g_250dps));
+static_assert(board::lsm6ds3_ctrl1_xl == (odr_104hz | fs_xl_4g));
+static_assert(board::lsm6ds3_ctrl2_g == (odr_104hz | fs_g_500dps));
 
 constexpr std::array addresses{board::lsm6ds3_addr_sa0_high, board::lsm6ds3_addr_sa0_low};
 

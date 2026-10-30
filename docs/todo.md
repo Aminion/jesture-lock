@@ -49,6 +49,7 @@ draws and converts to physical units.
 | `ruler-30` | 5 table slides of 30 cm, 2.7-4.8 s each | 307-359 mm (mean 334, +11%); gyro std 0.1-0.3 dps and accel std 9-30 mg while sliding, so hand thresholds miss the slow end: needs table thresholds |
 | `ruler-15` | 5 table slides of 15 cm, 2.1-3.3 s each | 143-156 mm (mean 149, -0.5%), v_end 10-36 mm/s, tilt error 0.05-0.12 deg: no scale error in the method; the +11% at 30 cm is unexplained (longer strokes, 0.5 deg turn, or overshoot) |
 | `air-lines` | ~20 cm lines in the air, hand holds between | per-hold gyro bias: tilt error 1.3-3.8 deg, v_end 140-570 mm/s; session bias: tilt error 0.4-1.0 deg, v_end 33-170 mm/s, strokes along clean directions (up/down within 25-51 mm of vertical) |
+| `peaks` | 20 s brisk gestures, 10 s max effort | gyro peak 182 dps (73% of 250), accel under 1.8 g (one 1.998 g sample when picking the board up); accel std per second up to 237 mg (brisk), 594 mg (max). Thin margin, so the firmware moved to +-4 g / 500 dps (quantization 0.122 mg, 17.5 mdps: still below the noise) |
 
 Design inputs for `docs/core.md`:
 - Accel calibration per board (3 offsets, 3 gains) from a tumble session, passed in at
@@ -113,7 +114,7 @@ UI (`viewer`, egui):
 5. [ ] Path drawing: a dot per sample, colored by speed (perceptual gradient, e.g. blue ->
    yellow, fixed range ~0..1.5 m/s with a legend); optional thin connecting line.
 6. [ ] Raw signal plot (gyro and accel, 6 axes) for debugging, with clipping marked
-   (+-250 dps and +-2 g may clip on fast moves).
+   (near the range ends: the `peaks` run at +-2 g / 250 dps reached ~1.8 g and 182 dps).
 
 # Later
 
