@@ -48,12 +48,15 @@ struct PortArgs {
 /// Read chunk size; the port timeout, not the buffer, paces the loops.
 const READ_BUF: usize = 256;
 
+/// How long one read waits for bytes before returning none.
+const PORT_TIMEOUT: Duration = Duration::from_millis(100);
+
 /// How often `check` prints a progress line (PC time: it only paces the output).
 const REPORT_EVERY: Duration = Duration::from_secs(1);
 
 fn open(PortArgs { port, baud }: &PortArgs) -> anyhow::Result<Box<dyn SerialPort>> {
     serialport::new(port, *baud)
-        .timeout(Duration::from_millis(100))
+        .timeout(PORT_TIMEOUT)
         // Asserting DTR on open resets the MCU through the ST-LINK (seen on this Nucleo).
         .dtr_on_open(false)
         .open()

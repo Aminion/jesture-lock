@@ -38,12 +38,14 @@ inline constexpr std::uint32_t uart_clock_hz = pclk_hz;
 inline constexpr std::uint32_t uart_max_baud_error_ppm = 10'000;
 
 // BRR must be >= 16 (RM0444 33.5.7) and fit in 16 bits.
+inline constexpr std::uint32_t uart_brr_min = 16;
+
 [[nodiscard]] constexpr bool uart_baud_ok(std::uint32_t baud) {
     if (baud == 0) {
         return false;
     }
     const std::uint32_t brr = uart_brr(baud);
-    return brr >= 16 && brr <= std::numeric_limits<std::uint16_t>::max() &&
+    return brr >= uart_brr_min && brr <= std::numeric_limits<std::uint16_t>::max() &&
            uart_baud_error_ppm(baud) <= uart_max_baud_error_ppm;
 }
 

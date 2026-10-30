@@ -13,6 +13,9 @@ pub const HELLO_LEN: usize = 8;
 pub const SAMPLE_LEN: usize = 20;
 pub const STATUS_LEN: usize = 22;
 
+const FW_STREAM: u8 = 1;
+const FW_RECOGNIZE: u8 = 2;
+
 /// `Hello.fw`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Firmware {
@@ -24,8 +27,8 @@ pub enum Firmware {
 impl From<u8> for Firmware {
     fn from(v: u8) -> Self {
         match v {
-            1 => Self::Stream,
-            2 => Self::Recognize,
+            FW_STREAM => Self::Stream,
+            FW_RECOGNIZE => Self::Recognize,
             v => Self::Unknown(v),
         }
     }
@@ -34,12 +37,17 @@ impl From<u8> for Firmware {
 impl From<Firmware> for u8 {
     fn from(fw: Firmware) -> Self {
         match fw {
-            Firmware::Stream => 1,
-            Firmware::Recognize => 2,
+            Firmware::Stream => FW_STREAM,
+            Firmware::Recognize => FW_RECOGNIZE,
             Firmware::Unknown(v) => v,
         }
     }
 }
+
+const IMU_NOT_FOUND: u8 = 0;
+const IMU_OK: u8 = 1;
+const IMU_UNKNOWN_WHO_AM_I: u8 = 2;
+const IMU_INIT_FAILED: u8 = 3;
 
 /// `Hello.imu`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -55,10 +63,10 @@ pub enum ImuStatus {
 impl From<u8> for ImuStatus {
     fn from(v: u8) -> Self {
         match v {
-            0 => Self::NotFound,
-            1 => Self::Ok,
-            2 => Self::UnknownWhoAmI,
-            3 => Self::InitFailed,
+            IMU_NOT_FOUND => Self::NotFound,
+            IMU_OK => Self::Ok,
+            IMU_UNKNOWN_WHO_AM_I => Self::UnknownWhoAmI,
+            IMU_INIT_FAILED => Self::InitFailed,
             v => Self::Unknown(v),
         }
     }
@@ -67,10 +75,10 @@ impl From<u8> for ImuStatus {
 impl From<ImuStatus> for u8 {
     fn from(imu: ImuStatus) -> Self {
         match imu {
-            ImuStatus::NotFound => 0,
-            ImuStatus::Ok => 1,
-            ImuStatus::UnknownWhoAmI => 2,
-            ImuStatus::InitFailed => 3,
+            ImuStatus::NotFound => IMU_NOT_FOUND,
+            ImuStatus::Ok => IMU_OK,
+            ImuStatus::UnknownWhoAmI => IMU_UNKNOWN_WHO_AM_I,
+            ImuStatus::InitFailed => IMU_INIT_FAILED,
             ImuStatus::Unknown(v) => v,
         }
     }
@@ -99,8 +107,10 @@ impl Hello {
             12_500, 26_000, 52_000, 104_000, 208_000, 416_000, 833_000, 1_660_000,
         ];
         let code = usize::from(self.ctrl2_g >> 4);
+        // 1 s in us, times 1000 for mHz.
+        const US_X_MHZ: u32 = 1_000_000 * 1000;
         let odr = ODR_MHZ.get(code.checked_sub(1)?)?;
-        Some(1_000_000_000 / odr)
+        Some(US_X_MHZ / odr)
     }
 }
 

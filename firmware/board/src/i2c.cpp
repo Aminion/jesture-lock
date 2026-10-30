@@ -32,6 +32,7 @@ static_assert(timingr == 0x1032'0309, "RM0444 Rev 6 Table 173");
 constexpr std::uint32_t timeout_ms = 5;
 
 constexpr std::size_t max_nbytes = 255;
+static_assert(max_nbytes == I2C_CR2_NBYTES_Msk >> I2C_CR2_NBYTES_Pos, "NBYTES is 8 bits");
 
 // Bus clear clocks at standard-mode speed, slow enough for any slave and any pull-up.
 constexpr std::uint32_t bus_clear_hz = 100'000;

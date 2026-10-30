@@ -127,7 +127,9 @@ int main() {
     // Hello and Status once per second, at most one of them per loop pass: with a Sample
     // that is at most 50 B, one 64 B UART TX buffer, so the pass does not block on TX.
     constexpr std::uint32_t tick_ms = 125;
-    constexpr std::uint32_t ticks_per_second = 8;
+    constexpr std::uint32_t ms_per_s = 1000;
+    constexpr std::uint32_t ticks_per_second = ms_per_s / tick_ms;
+    static_assert(ticks_per_second * tick_ms == ms_per_s && ticks_per_second % 2 == 0);
     std::uint32_t last_tick = board::millis();
     std::uint32_t ticks = 0;
     bool hello_due = true; // at boot
