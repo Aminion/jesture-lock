@@ -5,6 +5,7 @@
 #include "ring.hpp"
 #include "state.hpp"
 #include "still.hpp"
+#include "stroke.hpp"
 
 #include <algorithm>
 #include <cstdint>
@@ -82,13 +83,14 @@ extern "C" gc_event gc_feed(gc_state* s, const gc_sample* in) {
         break;
     case GC_ST_STILL:
         if (!quiet) {
-            // TODO(3c.1 step 3): stroke start, gravity window and replay.
+            gcore::start(st.stroke, st.ring, st.cfg, st.sa, st.bias_q8, in->t_us);
             st.mode = GC_ST_MOVING;
             ev.kind = GC_EV_MOVING;
         }
         break;
     default: // GC_ST_MOVING
-        // TODO(3c.1 steps 4, 5): integrate, LONG, snapshot, stroke end.
+        gcore::integrate(st.stroke, gcore::at(st.ring, 0), in->t_us);
+        // TODO(3c.1 step 5): LONG, snapshot, stroke end.
         break;
     }
     ev.state = st.mode;

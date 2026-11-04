@@ -8,6 +8,7 @@
 #include "ring.hpp"
 #include "state.hpp"
 #include "still.hpp"
+#include "stroke.hpp"
 
 #include <array>
 #include <cstdint>
@@ -220,6 +221,58 @@ static_assert(biased(alternating(90, 110), {0, 0, -1}, 10) ==
 static_assert(biased(alternating(100, 101), {25600, 25760, 0}, 1) ==
               std::array<std::int32_t, 3>{25602, 25759, 402});
 
+// --- stroke start: the gravity window -------------------------------------------------
+
+// A full ring: ages 0 .. guard_n and past the window hold +-30000 (must not count); the
+// gravity window (ages guard_n + 1 .. guard_n + grav_n) alternates z between z0 and z0 + 1
+// and x between x0 and x0 - 1.
+constexpr gcore::Ring gravity_ring(std::int16_t x0, std::int16_t z0) {
+    gcore::Ring r{};
+    for (int age = gcore::ring_n - 1; age >= 0; --age) {
+        const bool window = age > gcore::guard_n && age <= gcore::guard_n + gcore::grav_n;
+        const std::int16_t odd = age % 2 == 0 ? 0 : 1;
+        const std::int16_t far = age <= gcore::guard_n ? 30000 : -30000;
+        gcore::Raw x{};
+        x.accel = window ? std::array<std::int16_t, 3>{static_cast<std::int16_t>(x0 - odd), 0,
+                                                       static_cast<std::int16_t>(z0 + odd)}
+                         : std::array<std::int16_t, 3>{far, far, far};
+        gcore::push(r, x);
+    }
+    return r;
+}
+
+struct Cal {
+    std::int16_t off;
+    std::int32_t gain_q30;
+};
+
+// At 4 g full scale (122 ug/LSB).
+constexpr std::array<std::int32_t, 3> gravity_with(Cal cal) {
+    gc_config cfg = valid_config();
+    for (std::size_t i = 0; i < 3; ++i) {
+        cfg.accel_offset_lsb[i] = cal.off;
+        cfg.accel_gain_q30[i] = cal.gain_q30;
+    }
+    return gcore::gravity_ug(gravity_ring(-100, 8197), cfg, 122);
+}
+
+// Offset 0, gain 1: the mean times sa, rounded once. z: 8197.5 * 122 = 1000095.
+static_assert(gravity_with({.off = 0, .gain_q30 = gcore::one_q30}) ==
+              std::array<std::int32_t, 3>{-12261, 0, 1000095}); // x: -100.5 * 122 = -12261
+// Offset 1, gain 1.5: z (8196.5 * 1.5 * 122 = 1499959.5) and x (-101.5 * 1.5 * 122 =
+// -18574.5) are halves, rounded away from zero; y is -1.5 * 122 = -183.
+static_assert(gravity_with({.off = 1, .gain_q30 = 3 << 29}) ==
+              std::array<std::int32_t, 3>{-18575, -183, 1499960});
+// 16 g scale, full-scale readings, gain at its maximum: inside int64.
+static_assert([] {
+    gc_config cfg = valid_config();
+    cfg.accel_offset_lsb[0] = -32768;
+    cfg.accel_gain_q30[0] = gcore::gain_max_q30;
+    const auto g = gcore::gravity_ug(gravity_ring(32767, 0), cfg, 488);
+    // (32766.5 + 32768) * gain_max (1.1 - 4e-10) * 488 = 35178919.588
+    return g[0] == 35178920;
+}());
+
 // --- gc_init through the C ABI ------------------------------------------------------
 
 void test_init(gesture_test::Tests& t) {
@@ -326,6 +379,50 @@ void test_moving(gesture_test::Tests& t) {
     check(t, f.st().streak == 0); // the jolt is still in the window
 }
 
+void test_start(gesture_test::Tests& t) {
+    // Gyro x at 10 LSB: the bias moves during STILL and must freeze at the start.
+    Feeder f(valid_config());
+    gc_event ev{};
+    for (int i = 0; i < ready_at; ++i) {
+        f.feed({10, 0, 0}, {0, 0, 8197});
+    }
+    // Uneven steps before the move: t_s0 must sum the right ones.
+    for (std::uint32_t i = 0; i < 30; ++i) {
+        ev = f.feed({10, 0, 0}, {0, 0, 8197}, 9000 + i);
+    }
+    check(t, ev.state == GC_ST_STILL);
+    const auto bias = f.st().bias_q8;
+    check(t, bias[0] > 0);
+    check(t, is(f.feed({10, 0, 0}, {1000, 0, 8197}, 9500), GC_EV_MOVING, GC_ST_MOVING));
+    const gcore::Stroke& s = f.st().stroke;
+    std::uint32_t replay_us = 9500;
+    for (std::uint32_t i = 20; i < 30; ++i) {
+        replay_us += 9000 + i;
+    }
+    check(t, s.t_s0 == f.t - replay_us);
+    check(t, s.t == f.t && s.c == gcore::guard_n + 1); // replayed up to sample k
+    check(t, s.bias_q8 == bias);
+    check(t, s.gravity_ug == std::array<std::int32_t, 3>{0, 0, 8197 * 122});
+    check(t, s.q == std::array<std::int32_t, 4>{gcore::one_q30, 0, 0, 0});
+    check(t, s.n == 1 && s.step == 1 && !s.clipped);
+    // MOVING: one sample integrated per feed; the bias stays.
+    f.feed({10, 0, 0}, {0, 0, 8197});
+    check(t, s.t == f.t && s.c == gcore::guard_n + 2);
+    check(t, f.st().bias_q8 == bias);
+
+    // The clock wraps inside the replay: t_s0 is still guard_n + 1 steps back.
+    Feeder w(valid_config());
+    w.t = 0xFFFFFFFFU - ((ready_at + 5) * period_us);
+    w.rest_until_event(200, ev);
+    for (int i = 0; i < 8; ++i) {
+        w.rest();
+    }
+    w.feed({0, 0, 0}, {1000, 0, 8197});
+    const gcore::Stroke& ws = w.st().stroke;
+    check(t, w.st().mode == GC_ST_MOVING && w.t < 0x10000U);
+    check(t, ws.t_s0 == w.t - ((gcore::guard_n + 1) * period_us) && ws.t_s0 > w.t);
+}
+
 void test_gap(gesture_test::Tests& t) {
     gc_event ev{};
     // dt 0, dt > max_dt: a gap restarts the warmup (silently outside MOVING).
@@ -388,6 +485,7 @@ int main() {
     test_init(t);
     test_warmup(t);
     test_moving(t);
+    test_start(t);
     test_gap(t);
     test_bias(t);
     return gesture_test::finish(t, "core_test");

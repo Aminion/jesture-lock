@@ -6,6 +6,7 @@
 
 #include "gesture/core.h"
 #include "ring.hpp"
+#include "stroke.hpp"
 
 #include <array>
 #include <cstddef>
@@ -25,6 +26,7 @@ struct State {
     bool fed;             // a sample came since gc_init (else dt is undefined: a gap)
     std::uint16_t streak; // quiet windows in a row, saturating
     std::uint8_t mode;    // GC_ST_*
+    Stroke stroke;        // valid in MOVING
 };
 
 static_assert(sizeof(State) <= GC_STATE_SIZE);
