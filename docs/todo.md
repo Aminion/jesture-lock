@@ -114,7 +114,7 @@ host or the firmware.
      one decision differs, on the extent threshold (ruler-15, 19.25 vs 20 mm: integer
      points are rounded twice). `path` now rounds its config to the gc_config formats,
      so both decide on the same thresholds. State 1464 B of 2048.
-   - [x] Board self-test (`recognize`, `data/vectors/README.md`): 2400 samples of
+   - [x] Board self-test (`recognize`, `core/contract/vectors/v1/README.md`): 2400 samples of
      air-lines (19 events, 4 strokes) replayed through `gc_feed` at boot. 2026-11-04,
      16 MHz HSI: digest matches the host (events, strokes, points and every `gc_live`
      point bit for bit); stack peak 1088 B (`_Min_Stack_Size` raised from 1 KB to 1.5 KB); flash
@@ -135,7 +135,7 @@ host or the firmware.
      first-order step, every session agrees to within the rounding (checked once).
    - Open: "Ranges" needs |gyro_bias_q8| <= 2^23 (int16 range), which `gc_init` does not
      check; a v2 could make it a "Valid" rule.
-2. [x] Conformance vectors as data files (`data/vectors/README.md`): 22 GCV1 files, the
+2. [x] Conformance vectors as data files (`core/contract/vectors/v1/README.md`): 22 GCV1 files, the
    board vector, 4 whole sessions (ruler-15 near the extent threshold, ruler-30, hand-hold,
    air-lines) and 17 synthetic cases (`gesture-cli vectors`, `synth.rs`: min-jerk moves
    and turns through the inverse calibration; every scale, gaps, LONG, CLIPPED in the

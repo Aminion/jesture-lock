@@ -1,4 +1,7 @@
-# Conformance vectors
+# Conformance vectors, ABI v1
+
+Part of the `core.h` contract: `docs/core.md` says what an implementation does, these
+files say whether it does. A new ABI version gets its own directory beside this one.
 
 Recorded or synthetic IMU samples, each with its `gc_config` and the digest of what
 `core.h` gives on them (`docs/core.md`). An implementation conforms when it gives the
@@ -6,7 +9,8 @@ stored digest on every file. Checked on the host by `ctest` (`core/contract/test
 through `core.h` only) and by `cargo test` (which also checks that every file regenerates to
 the same bytes); on the MCU through the board vector.
 
-Regenerate all of them after a core change, in `host/`: `cargo run -q -p gesture-cli -- vectors`.
+Regenerate all of them after a core change, in `host/`: `cargo run -q -p gesture-cli -- vectors`
+(the generators stay in the tools; the recordings stay in `data/sessions/`).
 
 ## Format (GCV1)
 
@@ -34,11 +38,12 @@ starting from the basis at `gc_init`.
 
 ## Files
 
-`air-lines.gcv`, the board vector: the first 2400 samples (23 s) of `air-lines` (19
+`air-lines.gcv`, the board vector: the first 2400 samples (23 s) of
+`data/sessions/20261030-212525_air-lines.bin` (19
 events: READY, 9 MOVING, 4 SHORT, 1 DRIFT, 4 STROKE). The `recognize` firmware embeds it
 and replays it at boot (38.5 KB of flash, so the others stay on the host).
 
-`sessions/`: whole recordings, calibrated with `tumble`, initial gyro bias from
+`sessions/`: whole recordings from `data/sessions/`, calibrated with `tumble`, initial gyro bias from
 `rest-table`, hand thresholds (`vector::SESSIONS` in `host/crates/gesture-cli/src/vector.rs`):
 
 | File | Events | Why |

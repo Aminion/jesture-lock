@@ -7,8 +7,8 @@ target_link_libraries(core_vectors PRIVATE gesture_core)
 gesture_target_options(core_vectors)
 # Data, not sources: every committed vector (gesture-cli vectors writes them).
 file(GLOB GESTURE_VECTORS CONFIGURE_DEPENDS
-    ${PROJECT_SOURCE_DIR}/data/vectors/*.gcv
-    ${PROJECT_SOURCE_DIR}/data/vectors/*/*.gcv)
+    ${PROJECT_SOURCE_DIR}/core/contract/vectors/v1/*.gcv
+    ${PROJECT_SOURCE_DIR}/core/contract/vectors/v1/*/*.gcv)
 add_test(NAME core_vectors COMMAND core_vectors ${GESTURE_VECTORS})
 
 # core.h compiled as C11, the oldest C the contract supports. Build-only: a C++-only

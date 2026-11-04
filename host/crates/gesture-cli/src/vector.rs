@@ -211,7 +211,7 @@ fn digest(cfg: &GcConfig, samples: &[GcSample]) -> anyhow::Result<Expect> {
     })
 }
 
-/// The committed vectors from recordings, under `data/vectors/`: (file, session under
+/// The committed vectors from recordings, under `core/contract/vectors/v1/`: (file, session under
 /// `data/sessions/`, samples from the start; `None`: all). All calibrated with `tumble`
 /// (the motion sessions are +-2 g), the initial gyro bias from `rest-table`, hand
 /// thresholds. The first is the board vector, embedded by `recognize`.
@@ -236,9 +236,9 @@ pub fn session_vector(data: &Path, session: &str, n: Option<usize>) -> anyhow::R
     build(&rec, &cfg.gc(), n)
 }
 
-/// Writes every committed vector: `SESSIONS`, then the synthetic ones (`synth.rs`).
-pub fn write_all(data: &Path) -> anyhow::Result<()> {
-    let dir = data.join("vectors");
+/// Writes every committed vector into `dir`: `SESSIONS` (cut from the recordings in
+/// `data`), then the synthetic ones (`synth.rs`).
+pub fn write_all(data: &Path, dir: &Path) -> anyhow::Result<()> {
     std::fs::create_dir_all(dir.join("sessions"))?;
     for (file, session, n) in SESSIONS {
         let bytes = session_vector(data, session, *n)?;
@@ -317,7 +317,7 @@ pub fn check(b: &[u8]) -> anyhow::Result<(Expect, Expect)> {
 }
 
 #[cfg(test)]
-mod tests {
+pub mod tests {
     use std::path::{Path, PathBuf};
 
     use super::*;
@@ -326,6 +326,11 @@ mod tests {
         Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../../../data")
             .join(rel)
+    }
+
+    /// The committed vectors of ABI v1.
+    pub fn vectors() -> PathBuf {
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../core/contract/vectors/v1")
     }
 
     #[test]
@@ -370,7 +375,7 @@ mod tests {
     #[test]
     fn session_vectors_are_current() {
         for (file, session, n) in SESSIONS {
-            let path = data("vectors").join(file);
+            let path = vectors().join(file);
             let bytes = std::fs::read(&path).expect("vector file");
             let (stored, now) = check(&bytes).expect("vector");
             assert_eq!(

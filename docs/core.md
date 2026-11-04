@@ -3,8 +3,8 @@
 The contract between the core and its callers (the `recognize` firmware,
 `host/crates/gesture-core`). Change this document first, then the implementation and the
 FFI. An implementation conforms when it gives the same events and points, bit for bit, on
-the conformance vectors (`data/vectors/README.md`: format, digest, runner), run through
-`core.h` only.
+the conformance vectors (`core/contract/vectors/v1/README.md`: format, digest, runner), run
+through `core.h` only.
 
 ABI version: **1**, frozen 2026-10-30: the 3D path of one stroke (still detection, gyro
 tilt, gravity removal, double integration, zero-velocity correction). Any change to a

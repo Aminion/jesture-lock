@@ -1,7 +1,7 @@
-// The conformance vectors (data/vectors/, docs/core.md): each file given on the command
+// The conformance vectors (core/contract/vectors/, docs/core.md): each file given on the command
 // line is replayed from gc_init through gesture/core.h only, and its digest compared with
 // the one stored in it. Any implementation of core.h linked here runs the same suite.
-// Layout and digest: data/vectors/README.md (written by `gesture-cli vectors`).
+// Layout and digest: core/contract/vectors/v1/README.md (written by `gesture-cli vectors`).
 #include "gesture/core.h"
 
 #include <algorithm>
