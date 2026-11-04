@@ -1,9 +1,9 @@
 //! The window: a top bar (source, connection, counters), a side panel (state, last event,
-//! event log) and the stroke list. The drawing comes next (`docs/todo.md` 3e).
+//! event log), the 3D stroke view (`capture`) and the stroke list below it.
 //!
 //! Elm-shaped: the source's `Update`s fold into `View`; drawing reads the `Model` and
 //! returns `Action`s; `Model::act` applies them after the frame. Only the `Form` (what
-//! the source should be) is edited by widgets directly.
+//! the source should be) and the `Look` (camera, Keep all) are edited by widgets directly.
 
 use std::collections::VecDeque;
 use std::path::PathBuf;
@@ -16,6 +16,7 @@ use session::reference::Setup;
 use session::serial::{self, PortArgs};
 use session::strokes::Summary;
 
+use crate::capture::{self, Capture, Look};
 use crate::feed::{Limits, Update};
 use crate::source::{Control, Source, Worker};
 
@@ -52,6 +53,8 @@ enum Action {
     Speed(f64),
     /// Replay pause.
     Pause(bool),
+    /// Wipe the stroke view (the list and the log stay).
+    Clear,
 }
 
 /// The source being chosen: what the top bar widgets edit directly.
@@ -78,6 +81,7 @@ struct Model {
 #[derive(Debug)]
 pub struct App {
     form: Form,
+    look: Look,
     model: Model,
 }
 
@@ -125,6 +129,8 @@ struct View {
     live: Option<GcPoint>,
     /// Each stroke at its end: time, numbers, corrected points.
     strokes: Vec<(f64, Summary, Stroke)>,
+    /// Each move, for the stroke view.
+    capture: Capture,
     rejected: u64,
     log: VecDeque<Entry>,
     totals: Totals,
@@ -149,6 +155,7 @@ impl View {
                 self.state = None;
                 self.live = None;
                 self.since_start = None;
+                self.capture.restart();
             }
             Update::Sample { t_us, event, live } => {
                 let (t0, now0) = *self.since_start.get_or_insert((t_us, self.now));
@@ -156,6 +163,7 @@ impl View {
                 self.samples += 1;
                 self.state = Some(event.state);
                 self.live = live;
+                self.capture.sample(&event, live);
                 if !event.is_none() {
                     self.last_event = Some((self.now, event));
                     let tone = match event.kind {
@@ -179,6 +187,7 @@ impl View {
                         summary.distance_mm, summary.extent_mm
                     );
                 }
+                self.capture.stroke(self.strokes.len());
                 self.strokes.push((self.now, summary, stroke));
             }
             Update::Health(t) => self.totals = t,
@@ -245,7 +254,7 @@ fn describe(ev: &Event, limits: Option<Limits>) -> String {
 }
 
 const GREEN: Color32 = Color32::from_rgb(70, 170, 80);
-const BLUE: Color32 = Color32::from_rgb(70, 140, 230);
+pub const BLUE: Color32 = Color32::from_rgb(70, 140, 230);
 
 impl App {
     pub fn new(ctx: egui::Context, setup: Setup, start: Start) -> Self {
@@ -280,7 +289,11 @@ impl App {
         if start.file.is_some() || start.port.is_some() {
             model.act(&form, Action::Connect);
         }
-        Self { form, model }
+        Self {
+            form,
+            look: Look::default(),
+            model,
+        }
     }
 }
 
@@ -313,6 +326,7 @@ impl Model {
                 self.paused = p;
                 self.send(Control::Pause(p));
             }
+            Action::Clear => self.view.capture.clear(),
         }
     }
 
@@ -409,7 +423,7 @@ impl Model {
         }
     }
 
-    fn central(&self, ui: &mut Ui) {
+    fn central(&self, ui: &mut Ui, look: &mut Look, actions: &mut Vec<Action>) {
         let v = &self.view;
         match &v.ended {
             Some(None) => {
@@ -456,6 +470,13 @@ impl Model {
             None => {}
         }
         ui.separator();
+        if capture::show(ui, look, &v.capture, &v.strokes) {
+            actions.push(Action::Clear);
+        }
+    }
+
+    fn strokes_table(&self, ui: &mut Ui) {
+        let v = &self.view;
         ui.label(format!(
             "{} strokes, {} rejected",
             v.strokes.len(),
@@ -463,6 +484,7 @@ impl Model {
         ));
         egui::ScrollArea::vertical()
             .stick_to_bottom(true)
+            .auto_shrink(false)
             .show(ui, |ui| {
                 egui::Grid::new("strokes").striped(true).show(ui, |ui| {
                     for h in [
@@ -581,7 +603,7 @@ fn speed_name(speed: f64) -> &'static str {
 
 impl eframe::App for App {
     fn ui(&mut self, ui: &mut Ui, _frame: &mut eframe::Frame) {
-        let Self { form, model } = self;
+        let Self { form, look, model } = self;
         if let Some(w) = &model.worker {
             for u in w.updates() {
                 model.view.apply(u);
@@ -593,7 +615,11 @@ impl eframe::App for App {
             .resizable(true)
             .default_size(380.0)
             .show(ui, |ui| model.side(ui));
-        CentralPanel::default().show(ui, |ui| model.central(ui));
+        Panel::bottom("strokes")
+            .resizable(true)
+            .default_size(150.0)
+            .show(ui, |ui| model.strokes_table(ui));
+        CentralPanel::default().show(ui, |ui| model.central(ui, look, &mut actions));
         for a in actions {
             model.act(form, a);
         }
@@ -645,5 +671,63 @@ mod tests {
                 .zip(view.log.iter().skip(1))
                 .all(|(a, b)| a.t <= b.t)
         );
+    }
+
+    /// `docs/todo.md` 3e.4: ruler-30 replayed into the view gives a shot per move. Each
+    /// accepted one keeps its live path; levelled, its points are a straight, level line of
+    /// about 30 cm (the ruler lay on a table). Each reject ends its shot greyed.
+    #[test]
+    fn ruler_30_shots() {
+        let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../data/sessions");
+        let setup = Setup::load(&CoreArgs::vectors(&dir)).expect("setup");
+        let mut view = View::default();
+        let (mut strokes, mut rejects, mut long) = (0, 0, 0);
+        for u in replay_updates(&dir.join("20261030-211435_ruler-30.bin"), setup) {
+            let stroke = matches!(u, Update::Stroke { .. });
+            let reject = matches!(u, Update::Sample { event, .. } if matches!(event.kind, Kind::Rejected(_)));
+            view.apply(u);
+            if !(stroke || reject) {
+                continue;
+            }
+            let shot = view.capture.current().expect("a shot");
+            if reject {
+                rejects += 1;
+                assert!(matches!(shot.end, crate::capture::End::Rejected(_)));
+            }
+            if !stroke {
+                continue;
+            }
+            strokes += 1;
+            let crate::capture::End::Stroke(i) = shot.end else {
+                panic!("{:?}", shot.end);
+            };
+            assert!(!shot.live.is_empty());
+            let s = &view.strokes[i].2;
+            let (_, p) = crate::capture::levelled(s);
+            let end = *p.last().expect("points");
+            let len = end[0].hypot(end[1]).hypot(end[2]);
+            // Largest distance from the start-end line.
+            let off = p
+                .iter()
+                .map(|q| {
+                    let t = (q[0] * end[0] + q[1] * end[1] + q[2] * end[2]) / (len * len);
+                    (0..3)
+                        .map(|k| (q[k] - t * end[k]).powi(2))
+                        .sum::<f64>()
+                        .sqrt()
+                })
+                .fold(0.0, f64::max);
+            // The board lay flat: up is the board's z.
+            assert!(s.info.gravity_ug[2] > 990_000, "{:?}", s.info.gravity_ug);
+            if len > 100.0 {
+                long += 1;
+                assert!((200.0..400.0).contains(&len), "{len}");
+                assert!(off < 0.02 * len, "{off} off a {len} mm line");
+                assert!(end[2].abs() < 0.03 * len, "{end:?}");
+            }
+        }
+        assert_eq!((strokes, rejects), (4, 4));
+        // The first stroke is a 25 mm nudge; the other three slide the ruler's length.
+        assert_eq!(long, 3);
     }
 }

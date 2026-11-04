@@ -2,7 +2,9 @@
 //! to physical units (g, deg/s) for display only.
 
 mod app;
+mod capture;
 mod feed;
+mod scene;
 mod source;
 
 use std::path::PathBuf;

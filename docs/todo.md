@@ -215,7 +215,7 @@ the serial port testable without the board.
    from the summary. The log keeps the last 1000 lines; its clock (MCU time) goes on across
    an MCU reset. Test: ruler-30 replayed into the view logs 4 STROKE, 3 REJ SHORT, 1 REJ
    DRIFT and ends READY.
-4. [ ] Stroke capture in a 3D view (no 2D step first: points are in the board's axes at
+4. [x] Stroke capture in a 3D view (no 2D step first: points are in the board's axes at
    the stroke start, `docs/core.md`, so a fixed top view is only right for a flat board).
    Drawn on the 2D egui `Painter` with our own projection, no 3D library:
    - capture: while moving, the live path (`gc_live`, uncorrected); at `STROKE` the
@@ -234,6 +234,17 @@ the serial port testable without the board.
      repeat?).
    Check: projection and levelling unit-tested (known points -> known screen positions,
    `gravity_ug` along +z, which is up -> no rotation); ruler-30 strokes look straight and ~30 cm in fit view.
+   Done: `scene.rs` (math, no egui) and `capture.rs` (a shot per move, the canvas); the
+   stroke list moved to a bottom panel. Orthographic camera, so a scale bar of one grid
+   step reads lengths off the screen; Fit follows the drawing until the user scrolls
+   (double click fits again). A near-straight path has no plane of its own: Plane takes
+   the vertical one through it (seen from the side). The plane view's sign follows the
+   nearest preset, so it does not mirror between strokes. With the board's x near vertical,
+   forward falls back to its y. Tests: levelling (flat, on its side, nose up 45 degrees, on
+   its end; always a proper rotation), projection of known points per preset, fit, plane,
+   and ruler-30 replayed into the view: 4 strokes with their live paths, 4 rejects greyed;
+   the three ruler slides levelled are 250-360 mm, within 2 % of a straight line and 3 % of
+   level (gravity reads ~+1e6 ug on the board's z).
 5. [ ] Record session: write the incoming stream to `data/sessions/*.bin` in the `record`
    format, so anything seen live goes through the CLI tools. Saving one stroke as a
    template waits for `docs/template_format.md`.
