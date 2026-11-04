@@ -164,8 +164,13 @@ host or the firmware.
    (`Kind`, `State`, `Reject`) and an owned `Stroke`. Every output is checked against the
    "else 0" rules of `docs/core.md` (a violation panics), so `GcEvent::from(event)` gives
    the implementation's exact bytes and the cargo-side digests stay honest.
-2. [ ] `gesture-cli strokes <file>`: per stroke duration, net displacement, peak speed,
+2. [x] `gesture-cli strokes <file>`: per stroke duration, net displacement, peak speed,
    residual velocity before the correction. Ruler test: 30 cm slide -> ~0.30 m.
+   The integer core through the wrapper (`strokes.rs`), configured as `path`; rejected
+   moves listed with their reason. Peak speed is between the decimated points (step 4 or
+   8 here), so it averages short peaks. ruler-30 (tumble, rest-table bias, hand): three
+   long strokes of 309, 361 and 249 mm along x (mean 306), v_end 16..34 mm/s, peak
+   0.20..0.29 m/s, within 1 mm of the float reference; checked by a test.
 
 ### 3e: viewer
 

@@ -6,6 +6,7 @@ mod check;
 mod events;
 mod path;
 mod stats;
+mod strokes;
 mod synth;
 mod vector;
 
@@ -75,6 +76,12 @@ enum Command {
         #[command(flatten)]
         reference: ReferenceArgs,
     },
+    /// Strokes of the integer core (`core/` via FFI) on a session, configured as `path`:
+    /// duration, net displacement, peak speed, residual velocity before the correction.
+    Strokes {
+        #[command(flatten)]
+        reference: ReferenceArgs,
+    },
     /// Board test vector: the first samples of a session, its config and the digest of
     /// what the host core gives on them (`vector.rs`). The `recognize` firmware embeds it.
     Vector {
@@ -114,7 +121,7 @@ enum Command {
     },
 }
 
-/// A session and how to configure the core for it (`path`, `events`).
+/// A session and how to configure the core for it (`path`, `events`, `strokes`).
 #[derive(Debug, Args)]
 struct ReferenceArgs {
     /// Session file (`.bin`).
@@ -463,6 +470,12 @@ fn main() -> anyhow::Result<()> {
             let (rec, cfg, about) = reference_config(&reference)?;
             println!("{about}");
             print!("{}", events::report(&rec, &cfg.gc())?);
+            Ok(())
+        }
+        Command::Strokes { reference } => {
+            let (rec, cfg, about) = reference_config(&reference)?;
+            println!("{about}");
+            print!("{}", strokes::report(&rec, &cfg.gc())?);
             Ok(())
         }
         Command::Vectors { data, out } => vector::write_all(&data, &out),
