@@ -215,23 +215,31 @@ the serial port testable without the board.
    from the summary. The log keeps the last 1000 lines; its clock (MCU time) goes on across
    an MCU reset. Test: ruler-30 replayed into the view logs 4 STROKE, 3 REJ SHORT, 1 REJ
    DRIFT and ends READY.
-4. [ ] Stroke capture, first as a plain 2D top view: while moving, the live path (`gc_live`,
-   uncorrected); at `STROKE` replace it with the corrected points, so the jump shows the
-   drift; a rejected move greys out. The last stroke stays until the next. Beside it the
-   `strokes` numbers (|d|, duration, peak speed, v_end, extent).
-   - Clear: wipe the view.
-   - Keep all: overlay several strokes (does the same gesture repeat?).
+4. [ ] Stroke capture in a 3D view (no 2D step first: points are in the board's axes at
+   the stroke start, `docs/core.md`, so a fixed top view is only right for a flat board).
+   Drawn on the 2D egui `Painter` with our own projection, no 3D library:
+   - capture: while moving, the live path (`gc_live`, uncorrected); at `STROKE` the
+     corrected points, with the live path kept faint beside them, so the gap shows the
+     drift; a rejected move greys out. The last stroke stays until the next. Beside it
+     the `strokes` numbers (|d|, duration, peak speed, v_end, extent).
+   - level: rotate by the stroke's `gravity_ug` so up is up; forward = the board's x at
+     the stroke start (no magnetometer). Gravity comes only with `gc_stroke`, so the live
+     path and a rejected move stay in the board frame until then.
+   - camera: orbit with mouse drag, zoom with scroll; presets front / top / side, fit,
+     and plane (look along the normal of the stroke's best-fit plane: the flat view of
+     a gesture drawn in any direction).
+   - scene: floor grid, axis marker, start/end markers; far segments drawn first (sort by
+     depth, no depth buffer).
+   - Clear: wipe the view. Keep all: overlay several strokes (does the same gesture
+     repeat?).
+   Check: projection and levelling unit-tested (known points -> known screen positions,
+   `gravity_ug` along +z, which is up -> no rotation); ruler-30 strokes look straight and ~30 cm in fit view.
 5. [ ] Record session: write the incoming stream to `data/sessions/*.bin` in the `record`
    format, so anything seen live goes through the CLI tools. Saving one stroke as a
    template waits for `docs/template_format.md`.
-6. [ ] 3D view on the 2D egui `Painter`, our own projection (no 3D library):
-   - orbit with mouse drag, zoom with scroll, front/top/side presets, fit;
-   - axes: up from gravity, forward = board heading at the stroke start (no magnetometer);
-   - floor grid, axis marker, start/end markers;
-   - far segments drawn first (sort by depth, no depth buffer).
-7. [ ] Path drawing: a dot per point, colored by speed (perceptual gradient, e.g. blue ->
+6. [ ] Path drawing: a dot per point, colored by speed (perceptual gradient, e.g. blue ->
    yellow, fixed range ~0..1.5 m/s with a legend); optional thin connecting line.
-8. [ ] Raw signal plot (`egui_plot`, collapsible, off by default): gyro and accel, 6 axes,
+7. [ ] Raw signal plot (`egui_plot`, collapsible, off by default): gyro and accel, 6 axes,
    last few seconds, with clipping marked (near the range ends: the `peaks` run at
    +-2 g / 250 dps reached ~1.8 g and 182 dps).
 
