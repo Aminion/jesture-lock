@@ -1,11 +1,13 @@
 //! Safe wrapper over the C ABI in `core/include/gesture/core.h`.
 //! The same C++ sources are compiled for the MCU, so results must match bit for bit.
 //!
-//! So far `gc_init` and `gc_feed` only (3c.1 in progress); the full wrapper is 3d.1.
+//! A thin wrapper so far; the full one (owned types, docs) is 3d.1.
 
 pub mod ffi;
 
-use ffi::{GC_OK, GC_STATE_SIZE, GcConfig, GcEvent, GcSample, GcState, GcStatus};
+use ffi::{
+    GC_OK, GC_STATE_SIZE, GcConfig, GcEvent, GcPoint, GcSample, GcState, GcStatus, GcStrokeInfo,
+};
 
 /// One recognizer: the caller-owned `gc_state`, boxed (2 KB) so moves stay cheap.
 #[derive(Debug)]
@@ -33,6 +35,32 @@ impl Core {
     pub fn feed(&mut self, sample: &GcSample) -> GcEvent {
         // SAFETY: valid pointers; the state was initialized by a successful gc_init.
         unsafe { ffi::gc_feed(&raw mut *self.state, sample) }
+    }
+
+    /// `gc_stroke`: the last stroke (after `GC_EV_STROKE`, until the next `GC_EV_MOVING`).
+    pub fn stroke(&self) -> Option<(GcStrokeInfo, Vec<GcPoint>)> {
+        let mut info = GcStrokeInfo::default();
+        let mut points = vec![GcPoint::default(); usize::from(u16::MAX)];
+        let cap = u16::try_from(points.len()).unwrap_or(u16::MAX);
+        // SAFETY: valid pointers; `points` holds `cap` elements.
+        let n = unsafe {
+            ffi::gc_stroke(
+                &raw const *self.state,
+                &raw mut info,
+                points.as_mut_ptr(),
+                cap,
+            )
+        };
+        points.truncate(usize::from(n));
+        (n > 0).then_some((info, points))
+    }
+
+    /// `gc_live`: the current point of the stroke (uncorrected), `None` outside `MOVING`.
+    pub fn live(&self) -> Option<GcPoint> {
+        let mut p = GcPoint::default();
+        // SAFETY: valid pointers; the state was initialized by a successful gc_init.
+        let n = unsafe { ffi::gc_live(&raw const *self.state, &raw mut p) };
+        (n == 1).then_some(p)
     }
 }
 

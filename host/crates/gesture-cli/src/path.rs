@@ -26,9 +26,9 @@ const BIAS_GYRO_STD_DPS: f64 = 0.2;
 const BIAS_ACCEL_STD_MG: f64 = 2.0;
 const CLIP_LSB: i32 = 32700;
 const MAX_DT_US: u64 = 14423;
-const MIN_STROKE_US: u64 = 150_000;
+pub const MIN_STROKE_US: u64 = 150_000;
 const MAX_STROKE_US: u64 = 4_000_000;
-const MIN_EXTENT_MM: f64 = 20.0;
+pub const MIN_EXTENT_MM: f64 = 20.0;
 const MAX_V_END_MM_S: f64 = 300.0;
 /// Bias update rate: `bias += (mean - bias) / 64` per quiet sample.
 const BIAS_RATE: f64 = 64.0;
@@ -68,16 +68,19 @@ impl Config {
                 .gyro_udps_per_lsb()
                 .context("gyro not configured")?,
         );
-        let gyro_lsb = |dps: f64| dps * 1e6 / sg;
-        let accel_lsb = |mg: f64| mg * 1e3 / sa;
+        // Already in the integer formats of gc_config (whole LSB, Q30 gain, LSB x 256
+        // bias), so this reference and the integer core decide on the same numbers.
+        let gyro_lsb = |dps: f64| (dps * 1e6 / sg).round();
+        let accel_lsb = |mg: f64| (mg * 1e3 / sa).round();
+        let q30 = f64::from(1u32 << 30);
         Ok(Self {
             ctrl1_xl: rec.hello.ctrl1_xl,
             ctrl2_g: rec.hello.ctrl2_g,
             sa,
             sg,
-            offset_lsb: fit.map_or([0.0; 3], |f| f.offset.map(|g| g * 1e6 / sa)),
-            gain: fit.map_or([1.0; 3], |f| f.gain),
-            bias_lsb: bias_dps.map(gyro_lsb),
+            offset_lsb: fit.map_or([0.0; 3], |f| f.offset.map(|g| (g * 1e6 / sa).round())),
+            gain: fit.map_or([1.0; 3], |f| f.gain.map(|g| (g * q30).round() / q30)),
+            bias_lsb: bias_dps.map(|d| (d * 1e6 / sg * 256.0).round() / 256.0),
             still_gyro_std: gyro_lsb(still.gyro_std_dps),
             still_accel_std: accel_lsb(still.accel_std_mg),
             still_gyro_rate: gyro_lsb(still.gyro_mean_dps),
@@ -180,11 +183,11 @@ pub enum Reject {
 
 /// What a finished stroke looks like (`gc_stroke_info` plus diagnostics).
 pub struct Done {
-    duration_us: u64,
+    pub duration_us: u64,
     /// End position after the zero-velocity correction, start frame, mm.
     end_mm: V3,
-    extent_mm: f64,
-    v_end_mm_s: f64,
+    pub extent_mm: f64,
+    pub v_end_mm_s: f64,
     gravity_ug: V3,
     turned_deg: f64,
     /// Angle between the start hold's gravity and the end hold's, turned back into the
@@ -331,6 +334,13 @@ impl<'a> Core<'a> {
     fn spread_ok((s, q): (V3, V3), th: f64) -> bool {
         let n = WIN_N as f64;
         (0..3).all(|i| n * q[i] - s[i] * s[i] < n * n * th * th)
+    }
+
+    /// In a stroke: time since the start, us, and the uncorrected position, m (start frame).
+    /// For the tests against the integer core's `gc_live`.
+    #[cfg(test)]
+    pub fn live(&self) -> Option<(u64, V3)> {
+        self.stroke.as_ref().map(|s| (s.t_us, s.p))
     }
 
     pub fn feed(&mut self, t_us: u64, s: &Sample) -> Option<Event> {

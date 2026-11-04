@@ -3,9 +3,6 @@
 //! alignment and field offsets checked at compile time against the numbers in
 //! `core.h`/`docs/core.md`, so a drift between the two fails the build.
 
-// gc_stroke and gc_live have no caller yet; the safe wrapper in lib.rs (3d.1) will.
-#![allow(dead_code)]
-
 use core::mem::{align_of, offset_of, size_of};
 
 pub const GC_ABI_VERSION: u32 = 1;

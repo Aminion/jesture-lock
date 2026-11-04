@@ -18,8 +18,7 @@ namespace gcore {
 
 struct State {
     gc_config cfg;
-    std::int32_t sa;                     // accel ug/LSB
-    std::int32_t sg;                     // gyro udps/LSB
+    Scales sc;
     std::array<std::int32_t, 3> bias_q8; // gyro bias, LSB x 256
     Ring ring;
     std::uint32_t t_prev; // t_us of the previous sample

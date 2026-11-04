@@ -9,6 +9,7 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <iterator>
 #include <new>
 
 extern "C" gc_status gc_init(gc_state* s, const gc_config* cfg) {
@@ -19,8 +20,7 @@ extern "C" gc_status gc_init(gc_state* s, const gc_config* cfg) {
         return status;
     }
     st.cfg = *cfg;
-    st.sa = gcore::accel_ug_per_lsb(cfg->ctrl1_xl);
-    st.sg = gcore::gyro_udps_per_lsb(cfg->ctrl2_g);
+    st.sc = gcore::scales(*cfg);
     std::ranges::copy(cfg->gyro_bias_q8, st.bias_q8.begin());
     st.mode = GC_ST_WARMUP;
     return GC_OK;
@@ -32,6 +32,34 @@ gc_event rejected(std::uint8_t reason) {
     gc_event ev{};
     ev.kind = GC_EV_REJECTED;
     ev.reason = reason;
+    return ev;
+}
+
+// MOVING, after integrating this sample: too long, or the end hold (snapshot, end).
+gc_event moving(gcore::State& st) {
+    gcore::Stroke& k = st.stroke;
+    if (k.t - k.t_s0 > st.cfg.max_stroke_us) {
+        st.mode = GC_ST_WARMUP;
+        return rejected(GC_REJ_LONG);
+    }
+    gc_event ev{};
+    if (st.streak == 0) {
+        k.snapped = false;
+    } else if (st.streak == 1) {
+        k.snap = {.v = k.v, .p = k.p, .t = k.t, .clipped = k.clipped};
+        k.snapped = true;
+    } else if (st.streak == st.cfg.hold_n) { // > 1: the snapshot is there
+        const std::uint8_t reason = gcore::finish(k, st.cfg);
+        st.mode = GC_ST_STILL;
+        if (reason != 0) {
+            ev = rejected(reason);
+        } else {
+            ev.kind = GC_EV_STROKE;
+            ev.points = k.n;
+        }
+        ev.v_end_mm_s = k.v_end_mm_s;
+        ev.duration_us = k.duration_us;
+    }
     return ev;
 }
 
@@ -83,16 +111,44 @@ extern "C" gc_event gc_feed(gc_state* s, const gc_sample* in) {
         break;
     case GC_ST_STILL:
         if (!quiet) {
-            gcore::start(st.stroke, st.ring, st.cfg, st.sa, st.bias_q8, in->t_us);
+            gcore::start(st.stroke, st.ring, st.cfg, st.sc, st.bias_q8, in->t_us);
             st.mode = GC_ST_MOVING;
             ev.kind = GC_EV_MOVING;
         }
         break;
     default: // GC_ST_MOVING
-        gcore::integrate(st.stroke, gcore::at(st.ring, 0), in->t_us);
-        // TODO(3c.1 step 5): LONG, snapshot, stroke end.
+        gcore::integrate(st.stroke, gcore::at(st.ring, 0), st.cfg, st.sc, in->t_us);
+        ev = moving(st);
         break;
     }
     ev.state = st.mode;
     return ev;
+}
+
+extern "C" std::uint16_t gc_stroke(const gc_state* s, gc_stroke_info* info, gc_point* out,
+                                   std::uint16_t cap) {
+    const gcore::Stroke& k = gcore::state(s).stroke;
+    *info = gc_stroke_info{};
+    if (gcore::state(s).mode == GC_ST_MOVING || !k.done) {
+        return 0;
+    }
+    info->duration_us = k.duration_us;
+    info->points = k.n;
+    info->v_end_mm_s = k.v_end_mm_s;
+    std::ranges::copy(k.gravity_ug, std::begin(info->gravity_ug));
+    info->extent_mm = k.extent_mm;
+    info->step = gcore::satu16(k.step);
+    const std::uint16_t n = std::min<std::uint16_t>(k.n, cap);
+    std::copy_n(k.points.begin(), n, out);
+    return n;
+}
+
+extern "C" std::uint16_t gc_live(const gc_state* s, gc_point* out) {
+    const gcore::State& st = gcore::state(s);
+    if (st.mode != GC_ST_MOVING) {
+        *out = gc_point{};
+        return 0;
+    }
+    *out = gcore::point(st.stroke.p, st.stroke.t - st.stroke.t_s0);
+    return 1;
 }

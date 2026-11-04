@@ -233,8 +233,16 @@ At sample k (first non-quiet window), with ring indices relative to k:
   product, each component `rdiv(sum of four products, 2^30)`).
 - renormalize: `n = rdiv(qw^2 + qx^2 + qy^2 + qz^2, 2^30)`, each `q_i = rdiv(q_i * (3 * 2^30 - n), 2^31)`.
 - accel, ug: `a_i = rdiv((accel_i - off_i) * gain_q30_i * sa, 2^30)`.
-- rotate into the start frame with R(q) (Q30; diagonal `2^30 - rdiv(y^2 + z^2, 2^29)` etc.,
-  off-diagonal `rdiv(xy - wz, 2^29)` etc.): `f_i = rdiv(sum_j R_ij * a_j, 2^30)`.
+- rotate into the start frame with R(q), Q30 (v' = q v q*), each entry one `rdiv` of the
+  whole sum, with `D(s) = rdiv(s, 2^29)`:
+
+  |   | 0                      | 1                      | 2                      |
+  |---|------------------------|------------------------|------------------------|
+  | 0 | 2^30 - D(y^2 + z^2)    | D(xy - wz)             | D(xz + wy)             |
+  | 1 | D(xy + wz)             | 2^30 - D(x^2 + z^2)    | D(yz - wx)             |
+  | 2 | D(xz - wy)             | D(yz + wx)             | 2^30 - D(x^2 + y^2)    |
+
+  `f_i = rdiv(sum_j R_ij * a_j, 2^30)`.
 - velocity, nm/s: `v_i += rdiv((f_i - g_i) * dt * 980665, 10^8)` (9.80665 m/s^2 per g).
 - position, nm: `p_i += rdiv(v_i * dt, 10^6)`, with the new v.
 - clipped flag: set if any raw reading of this sample has abs >= clip_lsb.

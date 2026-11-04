@@ -13,6 +13,7 @@
 #include <array>
 #include <cstdint>
 #include <limits>
+#include <utility>
 
 namespace {
 
@@ -273,6 +274,226 @@ static_assert([] {
     return g[0] == 35178920;
 }());
 
+// --- integration ---------------------------------------------------------------------
+
+constexpr gcore::Quat identity{gcore::one_q30, 0, 0, 0};
+constexpr gcore::Scales scales_4g_500dps = gcore::scales(valid_config()); // 122, 17500
+
+// About 100 dps (5714 LSB at 500 dps) for 10 ms: 999950 udeg, half of it in Q30 rad.
+static_assert(gcore::half_angle({0, 0, 5714}, {0, 0, 0}, 17500, 10000) ==
+              std::array<std::int64_t, 3>{0, 0, 9369697});
+// The bias comes off first (100 / 256 LSB): 959885.75 udeg rounds up.
+static_assert(gcore::half_angle({5714, 0, 0}, {100, 0, 0}, 17500, 9600) ==
+              std::array<std::int64_t, 3>{8994291, 0, 0});
+// Negative rates round the same way.
+static_assert(gcore::half_angle({0, -5714, 0}, {0, 0, 0}, 17500, 10000) ==
+              std::array<std::int64_t, 3>{0, -9369697, 0});
+
+// h = 2^20 about z from identity: dq = (2^30 - 2^40 / 2^31, 0, 0, 2^20), exactly; |q|^2 =
+// 2^60 + 2^18 rounds to 2^30, so the renormalization leaves it.
+constexpr gcore::Quat small_turn{gcore::one_q30 - 512, 0, 0, 1 << 20};
+static_assert(gcore::turn(identity, {0, 0, 1 << 20}) == small_turn);
+static_assert(gcore::renormalize(small_turn) == small_turn);
+static_assert(gcore::renormalize(identity) == identity);
+// Off the unit sphere by 1e-4: one Newton step leaves 1 - 1e-8 (2^30 * 1e-8 = 11 LSB,
+// plus the rounding of |q|^2).
+static_assert(gcore::renormalize({gcore::one_q30 + 107374, 0, 0, 0}) ==
+              gcore::Quat{gcore::one_q30 - 16, 0, 0, 0});
+
+// R(identity) is the unit matrix; a quarter turn about z sends board x to start y.
+static_assert(gcore::rotation(identity) ==
+              gcore::Mat3{{{gcore::one_q30, 0, 0}, {0, gcore::one_q30, 0}, {0, 0, gcore::one_q30}}});
+static_assert([] {
+    constexpr std::int32_t c = 759250125; // 2^30 / sqrt(2)
+    const gcore::Mat3 r = gcore::rotation({c, 0, 0, c});
+    const auto near = [](std::int64_t x, std::int64_t want) {
+        return x - want <= 2 && want - x <= 2;
+    };
+    return near(r[1][0], gcore::one_q30) && near(r[0][1], -gcore::one_q30) &&
+           near(r[0][0], 0) && near(r[1][1], 0) && near(r[2][2], gcore::one_q30) &&
+           r[2][0] == 0 && r[0][2] == 0;
+}());
+
+// The calibration: (raw - off) * gain * sa, one rounding.
+static_assert([] {
+    gc_config cfg = valid_config();
+    cfg.accel_offset_lsb[0] = 10;
+    cfg.accel_offset_lsb[2] = -10;
+    cfg.accel_gain_q30[1] = 3 << 29;
+    // x: 8187 * 122; y: 1.5 * 3 * 122 = 549; z: -32758 * 122.
+    return gcore::accel_ug({8197, 3, -32768}, cfg, 122) ==
+           std::array<std::int64_t, 3>{998814, 549, -3996476};
+}());
+
+// A stroke from rest at identity, with this gravity (ug, start frame).
+constexpr gcore::Stroke fresh(std::array<std::int32_t, 3> gravity_ug) {
+    gcore::Stroke s{};
+    s.gravity_ug = gravity_ug;
+    s.q = identity;
+    s.step = 1;
+    s.n = 1;
+    return s;
+}
+
+constexpr gcore::Raw raw(std::array<std::int16_t, 3> gyro, std::array<std::int16_t, 3> accel,
+                         std::uint16_t dt = 9600) {
+    return gcore::Raw{.dt = dt, .gyro = gyro, .accel = accel};
+}
+
+// n samples of x, t counted from t_s0 = 0.
+constexpr gcore::Stroke run(gcore::Stroke s, const gcore::Raw& x, int n,
+                            const gc_config& cfg = valid_config()) {
+    for (int i = 0; i < n; ++i) {
+        gcore::integrate(s, x, cfg, scales_4g_500dps, s.t + x.dt);
+    }
+    return s;
+}
+
+// At rest, exactly at gravity and bias: nothing moves, nothing turns, ever.
+static_assert([] {
+    const gcore::Stroke s = run(fresh({0, 0, 8197 * 122}), raw({0, 0, 0}, {0, 0, 8197}), 300);
+    return s.q == identity && s.v == std::array<std::int64_t, 3>{} &&
+           s.p == std::array<std::int64_t, 3>{} && !s.clipped && s.c == 300;
+}());
+
+// 1 g along x for 10 x 10 ms, no gravity in the frame: v grows by the same step each
+// sample, p by the new v times dt.
+static_assert([] {
+    const gcore::Stroke s = run(fresh({0, 0, 0}), raw({0, 0, 0}, {8197, 0, 0}, 10000), 10);
+    // f = 8197 * 122 = 1000034 ug; dv = 1000034 * 10^4 * 980665 / 10^8 = 98069834.2 nm/s.
+    constexpr std::int64_t dv = 98069834;
+    // dp_k = k * dv * 10^4 / 10^6 = k * 980698.34 nm, rounded per step.
+    std::int64_t p = 0;
+    for (std::int64_t k = 1; k <= 10; ++k) {
+        p += gcore::rdiv(k * dv * 10000, 1000000);
+    }
+    return s.v == std::array<std::int64_t, 3>{10 * dv, 0, 0} &&
+           s.p == std::array<std::int64_t, 3>{p, 0, 0};
+}());
+
+// Turn ~90 deg about z (90 x 10 ms at 99.995 dps), then 1 g along board x: it must show
+// up along start +y (a transposed R would give -y).
+static_assert([] {
+    gcore::Stroke s = run(fresh({0, 0, 0}), raw({0, 0, 5714}, {0, 0, 0}, 10000), 90);
+    // q ~ (cos 45, 0, 0, sin 45): 759279940 each for exactly 89.9955 deg.
+    if (s.v != std::array<std::int64_t, 3>{} || s.q[1] != 0 || s.q[2] != 0 ||
+        s.q[0] < 759200000 || s.q[0] > 759300000 || s.q[3] < 759200000 ||
+        s.q[3] > 759300000) {
+        return false;
+    }
+    s = run(s, raw({0, 0, 0}, {8197, 0, 0}, 10000), 1);
+    // All of one step (98069834) on y; on x, cos(89.996 deg) of it, under 10^4.
+    return s.v[1] == 98069834 && s.v[0] > 0 && s.v[0] < 10000 && s.v[2] == 0;
+}());
+
+// The clip flag: |reading| >= clip_lsb on any axis, -32768 included.
+static_assert(!run(fresh({}), raw({0, 0, 0}, {32699, 0, 0}), 1).clipped);
+static_assert(run(fresh({}), raw({0, 0, 0}, {0, 0, 32700}), 1).clipped);
+static_assert(run(fresh({}), raw({0, -32768, 0}, {0, 0, 0}), 1).clipped);
+static_assert([] {
+    gcore::Stroke s = run(fresh({}), raw({0, 0, 0}, {-32700, 0, 0}), 1);
+    s = run(s, raw({0, 0, 0}, {0, 0, 0}), 5); // and it stays set
+    return s.clipped;
+}());
+
+// The point buffer: point i at c = i * step. Full at 64 points (c = 0 .. 63); the store at
+// c = 64 first keeps 0, 2, .. 62 (32 points), doubles step, then stores c = 64.
+static_assert([] {
+    const gcore::Raw x = raw({0, 0, 0}, {0, 0, 0}); // 96 x 100 us per sample
+    gcore::Stroke s = run(fresh({}), x, 63);
+    if (s.n != 64 || s.step != 1 || s.points[63].t_100us != 63 * 96) {
+        return false;
+    }
+    s = run(s, x, 1);
+    if (s.n != 33 || s.step != 2 || s.points[1].t_100us != 2 * 96 ||
+        s.points[31].t_100us != 62 * 96 || s.points[32].t_100us != 64 * 96) {
+        return false;
+    }
+    s = run(s, x, 1); // c = 65: not a multiple of 2
+    if (s.n != 33) {
+        return false;
+    }
+    s = run(s, x, 63); // c = 128: full at c = 126, step 4, keeps 0, 4, .. 124, stores 128
+    return s.n == 33 && s.step == 4 && s.points[1].t_100us == 4 * 96 &&
+           s.points[32].t_100us == 128 * 96;
+}());
+
+// Points round p (nm) to mm and t to 100 us, halves away from zero, and saturate.
+static_assert([] {
+    const gc_point a = gcore::point({1500000, -1500000, 1499999}, 149);
+    const gc_point b = gcore::point({40000000000, -40000000000, 0}, 6553550);
+    return a.x_mm == 2 && a.y_mm == -2 && a.z_mm == 1 && a.t_100us == 1 && b.x_mm == 32767 &&
+           b.y_mm == -32768 && b.t_100us == 65535;
+}());
+
+// --- stroke end ------------------------------------------------------------------------
+
+// Points at 0, 0.5, 1 and 1.5 s (x 0, 100, 200, 300 mm); the snapshot at 1 s with
+// p = 200 mm and a leftover 100 mm/s on x.
+constexpr gcore::Stroke ended(std::uint32_t t_s0 = 1000) {
+    gcore::Stroke s = fresh({0, 0, 1000000});
+    s.t_s0 = t_s0;
+    s.points[1] = {.x_mm = 100, .y_mm = 0, .z_mm = 0, .t_100us = 5000};
+    s.points[2] = {.x_mm = 200, .y_mm = 0, .z_mm = 0, .t_100us = 10000};
+    s.points[3] = {.x_mm = 300, .y_mm = 0, .z_mm = 0, .t_100us = 15000};
+    s.n = 4;
+    s.snap = {.v = {100000000, 0, -400000}, .p = {200000000, 0, 0}, .t = t_s0 + 1000000,
+              .clipped = false};
+    s.snapped = true;
+    return s;
+}
+
+// c = v t^2 / (2 T): 12.5 mm at 0.5 s (rounds to 13), 50 mm at 1 s. The 1.5 s point goes;
+// the snapshot point is appended even though a point already sits at t = T.
+static_assert([] {
+    gcore::Stroke s = ended(0xFFFFFFF0U); // the clock wraps inside the stroke
+    const std::uint8_t reason = gcore::finish(s, valid_config());
+    const auto at = [&](std::size_t i, std::int16_t x, std::uint16_t t_100us) {
+        return s.points[i].x_mm == x && s.points[i].y_mm == 0 && s.points[i].z_mm == 0 &&
+               s.points[i].t_100us == t_100us;
+    };
+    return reason == 0 && s.done && s.n == 4 && at(0, 0, 0) && at(1, 87, 5000) &&
+           at(2, 150, 10000) && at(3, 150, 10000) && s.duration_us == 1000000 &&
+           s.v_end_mm_s == 100 && s.extent_mm == 150;
+}());
+
+// The checks, in order: CLIPPED, SHORT (duration), DRIFT, SHORT (extent).
+template <typename F> constexpr std::uint8_t end_with(F change) {
+    gcore::Stroke s = ended();
+    gc_config cfg = valid_config();
+    change(s, cfg);
+    const std::uint8_t reason = gcore::finish(s, cfg);
+    return s.done == (reason == 0) ? reason : 0xFF;
+}
+
+static_assert(end_with([](gcore::Stroke&, gc_config&) {}) == 0);
+static_assert(end_with([](gcore::Stroke& s, gc_config& c) {
+                  s.snap.clipped = true;
+                  c.min_stroke_us = 2000000;
+              }) == GC_REJ_CLIPPED);
+static_assert(end_with([](gcore::Stroke&, gc_config& c) {
+                  c.min_stroke_us = 1000001;
+                  c.max_v_end_mm_s = 99;
+              }) == GC_REJ_SHORT);
+static_assert(end_with([](gcore::Stroke&, gc_config& c) { c.min_stroke_us = 1000000; }) == 0);
+static_assert(end_with([](gcore::Stroke&, gc_config& c) {
+                  c.max_v_end_mm_s = 99;
+                  c.min_extent_mm = 151;
+              }) == GC_REJ_DRIFT);
+static_assert(end_with([](gcore::Stroke&, gc_config& c) { c.max_v_end_mm_s = 100; }) == 0);
+static_assert(end_with([](gcore::Stroke&, gc_config& c) { c.min_extent_mm = 151; }) ==
+              GC_REJ_SHORT);
+static_assert(end_with([](gcore::Stroke&, gc_config& c) { c.min_extent_mm = 150; }) == 0);
+
+// A full buffer at the end: compacted first, then the snapshot point appended.
+static_assert([] {
+    gcore::Stroke s = run(fresh({}), raw({0, 0, 0}, {0, 0, 0}), 63); // 64 points
+    s.snap = {.v = {}, .p = {}, .t = s.t, .clipped = false};
+    const std::uint8_t reason = gcore::finish(s, valid_config());
+    return reason == GC_REJ_SHORT && s.n == 33 && s.step == 2 &&
+           s.points[31].t_100us == 62 * 96 && s.points[32].t_100us == 63 * 96;
+}());
+
 // --- gc_init through the C ABI ------------------------------------------------------
 
 void test_init(gesture_test::Tests& t) {
@@ -403,8 +624,10 @@ void test_start(gesture_test::Tests& t) {
     check(t, s.t == f.t && s.c == gcore::guard_n + 1); // replayed up to sample k
     check(t, s.bias_q8 == bias);
     check(t, s.gravity_ug == std::array<std::int32_t, 3>{0, 0, 8197 * 122});
-    check(t, s.q == std::array<std::int32_t, 4>{gcore::one_q30, 0, 0, 0});
-    check(t, s.n == 1 && s.step == 1 && !s.clipped);
+    // The bias has not caught up with the 10 LSB yet: the replay turns a little about x.
+    check(t, s.q[0] < gcore::one_q30 && s.q[1] > 0 && s.q[2] == 0 && s.q[3] == 0);
+    check(t, s.n == gcore::guard_n + 2 && s.step == 1 && !s.clipped); // point 0 + replay
+    check(t, s.v[0] > 0); // the jolt, on x
     // MOVING: one sample integrated per feed; the bias stays.
     f.feed({10, 0, 0}, {0, 0, 8197});
     check(t, s.t == f.t && s.c == gcore::guard_n + 2);
@@ -478,6 +701,188 @@ void test_bias(gesture_test::Tests& t) {
     check(t, g.st().mode == GC_ST_STILL && g.st().bias_q8[0] == 0);
 }
 
+void test_live(gesture_test::Tests& t) {
+    Feeder f(valid_config());
+    gc_point p{.x_mm = 1, .y_mm = 1, .z_mm = 1, .t_100us = 1};
+    check(t, gc_live(&f.s, &p) == 0 && p.x_mm == 0 && p.y_mm == 0 && p.z_mm == 0 &&
+                 p.t_100us == 0);
+    gc_event ev{};
+    f.rest_until_event(200, ev);
+    check(t, gc_live(&f.s, &p) == 0);
+    f.feed({0, 0, 0}, {1000, 0, 8197}); // MOVING: the replay already moved
+    for (int i = 0; i < 5; ++i) {
+        f.rest();
+        const gcore::Stroke& s = f.st().stroke;
+        check(t, gc_live(&f.s, &p) == 1);
+        // As a stored point would be, here every sample (step 1).
+        const gc_point& last = s.points[s.n - 1];
+        check(t, p.x_mm == last.x_mm && p.y_mm == last.y_mm && p.z_mm == last.z_mm &&
+                     p.t_100us == last.t_100us);
+        check(t, p.t_100us == static_cast<std::uint32_t>(gcore::guard_n + 2 + i) * period_us / 100);
+    }
+    check(t, f.st().stroke.v[0] > 0 && f.st().stroke.p[0] > 0);
+    // A gap ends the move: nothing live.
+    f.rest(30000);
+    check(t, gc_live(&f.s, &p) == 0 && p.t_100us == 0);
+}
+
+// A hold, then a move along x: +a for n samples, -a for n (back to rest), then rest.
+// 1000 LSB at 4 g is 1.2 m/s^2; 30 + 30 samples of 9.6 ms move it ~100 mm.
+struct Move {
+    std::int16_t a = 1000;
+    int n = 30;
+    int brake = 30;          // samples of -a
+    std::int16_t clip_at = 0; // if not 0: the 6th sample reads this instead of a
+};
+
+constexpr std::array<std::int16_t, 3> flat(std::int16_t ax) {
+    return {ax, 0, 8197};
+}
+
+// Returns the first event that is not NONE, from the MOVING one on, within 200 rest
+// samples after the move.
+gc_event stroke(Feeder& f, Move m) {
+    gc_event ev{};
+    f.rest_until_event(200, ev); // READY
+    ev = f.feed({0, 0, 0}, flat(m.a));
+    if (ev.kind != GC_EV_MOVING) {
+        return ev;
+    }
+    for (int i = 1; i < m.n; ++i) {
+        f.feed({0, 0, 0}, flat(i == 5 && m.clip_at != 0 ? m.clip_at : m.a));
+    }
+    for (int i = 0; i < m.brake; ++i) {
+        f.feed({0, 0, 0}, flat(static_cast<std::int16_t>(-m.a)));
+    }
+    for (int i = 0; i < 200; ++i) {
+        ev = f.rest();
+        if (ev.kind != GC_EV_NONE) {
+            return ev;
+        }
+    }
+    return ev;
+}
+
+void test_stroke(gesture_test::Tests& t) {
+    Feeder f(valid_config());
+    gc_stroke_info info{};
+    info.duration_us = 1;
+    std::array<gc_point, gcore::points_n> pts{};
+    check(t, gc_stroke(&f.s, &info, pts.data(), gcore::points_n) == 0 && info.duration_us == 0);
+
+    const gc_event ev = stroke(f, {});
+    // Snapshot at the first quiet window: win_n samples after the last braking one; the
+    // end hold_n - 1 samples later.
+    const std::uint32_t big_t = (gcore::guard_n + 1 + 59 + gcore::win_n) * period_us;
+    check(t, ev.kind == GC_EV_STROKE && ev.state == GC_ST_STILL && ev.reason == 0);
+    check(t, ev.duration_us == big_t && ev.v_end_mm_s <= 1);
+    check(t, f.st().streak == 20 && gc_live(&f.s, pts.data()) == 0);
+
+    check(t, gc_stroke(&f.s, &info, pts.data(), gcore::points_n) == ev.points);
+    check(t, info.duration_us == big_t && info.points == ev.points &&
+                 info.v_end_mm_s == ev.v_end_mm_s && info.step == 2);
+    check(t, info.gravity_ug[0] == 0 && info.gravity_ug[1] == 0 &&
+                 info.gravity_ug[2] == 8197 * 122);
+    // ~1.2 m/s^2 * (0.288 s)^2 = 100 mm along x, and nothing else.
+    check(t, info.extent_mm >= 95 && info.extent_mm <= 110);
+    const gc_point& last = pts[ev.points - 1];
+    check(t, last.t_100us == big_t / 100 && std::cmp_equal(last.x_mm, info.extent_mm) && last.y_mm == 0 &&
+                 last.z_mm == 0);
+    // The snapshot (c = 102) falls on a stored point (step 2): docs/core.md appends it
+    // anyway, so the last two points are the same.
+    check(t, pts[ev.points - 2].t_100us == last.t_100us && pts[ev.points - 2].x_mm == last.x_mm);
+    bool rising = pts[0].t_100us == 0 && pts[0].x_mm == 0;
+    for (std::size_t i = 1; i + 1 < ev.points; ++i) {
+        rising = rising && pts[i].t_100us > pts[i - 1].t_100us;
+    }
+    check(t, rising);
+    // cap limits the copy, not info.
+    check(t, gc_stroke(&f.s, &info, pts.data(), 3) == 3 && info.points == ev.points);
+    // Readable until the next MOVING, through a gap too.
+    f.rest(30000);
+    check(t, gc_stroke(&f.s, &info, pts.data(), gcore::points_n) == ev.points);
+    gc_event next{};
+    f.rest_until_event(200, next);
+    f.feed({0, 0, 0}, flat(1000));
+    check(t, gc_stroke(&f.s, &info, pts.data(), gcore::points_n) == 0 && info.points == 0);
+}
+
+void test_stroke_rejects(gesture_test::Tests& t) {
+    const auto end_hold = [](const gc_event& ev, std::uint8_t reason) {
+        return ev.kind == GC_EV_REJECTED && ev.state == GC_ST_STILL && ev.reason == reason &&
+               ev.points == 0 && ev.duration_us > 0;
+    };
+    gc_stroke_info info{};
+    gc_point pt{};
+    {
+        Feeder f(valid_config());
+        check(t, end_hold(stroke(f, {.clip_at = 32700}), GC_REJ_CLIPPED));
+        check(t, gc_stroke(&f.s, &info, &pt, 1) == 0 && info.duration_us == 0);
+    }
+    {
+        gc_config cfg = valid_config();
+        cfg.min_stroke_us = 2000000;
+        Feeder f(cfg);
+        check(t, end_hold(stroke(f, {}), GC_REJ_SHORT));
+    }
+    {
+        gc_config cfg = valid_config();
+        cfg.min_extent_mm = 200;
+        Feeder f(cfg);
+        check(t, end_hold(stroke(f, {}), GC_REJ_SHORT));
+    }
+    {
+        // 10 braking samples short: 1.2 m/s^2 * 96 ms = 117 mm/s left over.
+        gc_config cfg = valid_config();
+        cfg.max_v_end_mm_s = 100;
+        Feeder f(cfg);
+        const gc_event ev = stroke(f, {.brake = 20});
+        check(t, end_hold(ev, GC_REJ_DRIFT) && ev.v_end_mm_s > 105 && ev.v_end_mm_s < 125);
+    }
+}
+
+void test_long(gesture_test::Tests& t) {
+    Feeder f(valid_config());
+    gc_event ev{};
+    f.rest_until_event(200, ev);
+    check(t, f.feed({0, 0, 0}, flat(1000)).kind == GC_EV_MOVING);
+    // At MOVING t - t_s0 is (guard_n + 1) steps; LONG once it passes max_stroke_us.
+    constexpr int j_long = ((4000000 - ((gcore::guard_n + 1) * 9600)) / 9600) + 1; // 406
+    int j = 1;
+    for (; j < 1000; ++j) {
+        ev = f.feed({0, 0, 0}, flat(j % 2 == 0 ? 1000 : -1000));
+        if (ev.kind != GC_EV_NONE) {
+            break;
+        }
+    }
+    check(t, j == j_long && is(ev, GC_EV_REJECTED, GC_ST_WARMUP, GC_REJ_LONG));
+    gc_point pt{};
+    gc_stroke_info info{};
+    check(t, gc_live(&f.s, &pt) == 0 && gc_stroke(&f.s, &info, &pt, 1) == 0);
+    // Then the usual warmup: no gap, so the ring stays and READY comes on the hold.
+    check(t, f.rest_until_event(200, ev) > 0 && is(ev, GC_EV_READY, GC_ST_STILL));
+}
+
+void test_pause(gesture_test::Tests& t) {
+    // A pause shorter than the hold: the snapshot taken in it is dropped when the move
+    // resumes, and the stroke ends at the later one.
+    Feeder f(valid_config());
+    gc_event ev{};
+    f.rest_until_event(200, ev);
+    f.feed({0, 0, 0}, flat(1000));
+    for (int i = 0; i < 40; ++i) { // a quiet window: streak 9, snapshot at streak 1
+        f.rest();
+    }
+    check(t, f.st().mode == GC_ST_MOVING && f.st().streak == 9 && f.st().stroke.snapped);
+    f.feed({0, 0, 0}, flat(1000));
+    check(t, f.st().streak == 0 && !f.st().stroke.snapped);
+    f.feed({0, 0, 0}, flat(0));
+    while ((ev = f.rest()).kind == GC_EV_NONE) {
+    }
+    // Snapshot win_n samples after the second jolt's -> 0 step, 2 + win_n after s0+11+40.
+    check(t, ev.duration_us == (gcore::guard_n + 1 + 40 + 2 + gcore::win_n - 1) * period_us);
+}
+
 } // namespace
 
 int main() {
@@ -488,5 +893,10 @@ int main() {
     test_start(t);
     test_gap(t);
     test_bias(t);
+    test_live(t);
+    test_stroke(t);
+    test_stroke_rejects(t);
+    test_long(t);
+    test_pause(t);
     return gesture_test::finish(t, "core_test");
 }

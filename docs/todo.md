@@ -103,6 +103,32 @@ host or the firmware.
    library calls). If it does not fit: shifts for power-of-two divisors, spreading the
    replay, or the PLL (64 MHz). State: ring 48 x 14 B, points 64 x 8 B, the rest ~300 B,
    ~1.5 KB of the 2048 B `GC_STATE_SIZE`.
+   - [x] step 4, integration: turn, renormalize, R(q) (now spelled out in full in
+     `core.md`, same formula), gravity removal, v and p, clip flag, point buffer,
+     `gc_live`. Checked against the float reference on `hand-hold`: the first stroke's
+     `gc_live` path (406 samples, 197 mm) is within 0.53 mm of it, i.e. the mm rounding
+     (`events.rs`).
+   - [x] step 5: LONG, snapshot, stroke end, `gc_stroke`. Every event of every session
+     against `path` (`events.rs`): same sample, kind, reason and duration; v_end within
+     0.5 % (the first-order quaternion step leaks a little gravity over big turns);
+     one decision differs, on the extent threshold (ruler-15, 19.25 vs 20 mm: integer
+     points are rounded twice). `path` now rounds its config to the gc_config formats,
+     so both decide on the same thresholds. State 1464 B of 2048.
+   - Spec question: "append the snapshot point" also when a point already sits at
+     t = T (the snapshot sample was stored), giving two equal points. Harmless, but
+     decide before 3c.2 whether v1 means it.
+   - Spec gap for 3c.2: the correction `rdiv(rdiv(v * t, 10^6) * t, 2 T)` overflows
+     int64 for |v_end| > ~215 m/s at T ~ 6.5 s; "Ranges" covers |v| < 10 m/s only. A
+     hand cannot get there, a synthetic vector can (~3.5 g held while MOVING). Fix:
+     run CLIPPED, SHORT (duration) and DRIFT before the correction (a rejection shows
+     neither points nor extent, so the outputs stay the same), bounding v by
+     max_v_end_mm_s (unless it is 65535).
+   - The v_end tolerance is the rotation step: with `path` switched to the same
+     first-order step, every session agrees to within the rounding (checked once).
+   - Spec gap for 3c.2: the sample counter c and `step` have no width in `core.md`. The
+     C++ keeps both uint32; `gc_stroke_info.step` is uint16, so it overflows only with
+     max_stroke_us / dt > 2^21 samples (dt < 4 us). Bound it (a minimum dt, or saturate
+     step) before the synthetic vectors probe it.
 2. [ ] Conformance vectors as data files (raw recording in -> events and path out),
    checked through `core.h` only, so any implementation runs the same suite. Synthetic
    strokes (known path -> ideal IMU signals) plus real recordings.

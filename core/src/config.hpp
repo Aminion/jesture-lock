@@ -32,6 +32,16 @@ static_assert(ring_n >= grav_n + guard_n + 1);
     return sg[(ctrl2_g >> 2U) & 3U];
 }
 
+// Both sensitivities of a config: sa ug/LSB, sg udps/LSB.
+struct Scales {
+    std::int32_t sa;
+    std::int32_t sg;
+};
+
+[[nodiscard]] constexpr Scales scales(const gc_config& cfg) {
+    return {.sa = accel_ug_per_lsb(cfg.ctrl1_xl), .sg = gyro_udps_per_lsb(cfg.ctrl2_g)};
+}
+
 // accel_gain_q30 range: 0.9 * 2^30 rounded up, 1.1 * 2^30 rounded down.
 inline constexpr std::int32_t gain_min_q30 = 966367642;
 inline constexpr std::int32_t gain_max_q30 = 1181116006;
