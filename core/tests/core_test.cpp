@@ -5,7 +5,11 @@
 #include "config.hpp"
 #include "gesture/core.h"
 #include "gesture/test/check.hpp"
+#include "ring.hpp"
+#include "state.hpp"
+#include "still.hpp"
 
+#include <array>
 #include <cstdint>
 #include <limits>
 
@@ -140,6 +144,82 @@ static_assert(validate_with([](gc_config& c) {
                   c.hold_n = 0;
               }) == GC_ERR_SCALE);
 
+// --- ring ---------------------------------------------------------------------------
+
+constexpr gcore::Raw raw_dt(std::uint16_t dt) {
+    return gcore::Raw{.dt = dt, .gyro = {}, .accel = {}};
+}
+
+// Pushes 1, 2, ..., n as dt.
+constexpr gcore::Ring ring_of(int n) {
+    gcore::Ring r{};
+    for (int i = 1; i <= n; ++i) {
+        gcore::push(r, raw_dt(static_cast<std::uint16_t>(i)));
+    }
+    return r;
+}
+
+static_assert(ring_of(0).count == 0);
+static_assert(ring_of(3).count == 3 && gcore::at(ring_of(3), 0).dt == 3 &&
+              gcore::at(ring_of(3), 2).dt == 1);
+static_assert(ring_of(gcore::ring_n).count == gcore::ring_n &&
+              gcore::at(ring_of(gcore::ring_n), gcore::ring_n - 1).dt == 1);
+// Past full: the oldest drop out, the count stays.
+static_assert(ring_of(100).count == gcore::ring_n && gcore::at(ring_of(100), 0).dt == 100 &&
+              gcore::at(ring_of(100), gcore::ring_n - 1).dt == 100 - gcore::ring_n + 1);
+static_assert([] {
+    gcore::Ring r = ring_of(60);
+    gcore::clear(r);
+    gcore::push(r, raw_dt(7));
+    return r.count == 1 && gcore::at(r, 0).dt == 7;
+}());
+
+// --- still window ---------------------------------------------------------------------
+
+// win_n samples alternating between a and b on every gyro and accel axis.
+constexpr gcore::Ring alternating(std::int16_t a, std::int16_t b) {
+    gcore::Ring r{};
+    for (int i = 0; i < gcore::win_n; ++i) {
+        const std::int16_t x = i % 2 == 0 ? a : b;
+        gcore::push(r, gcore::Raw{.dt = 1, .gyro = {x, x, x}, .accel = {x, x, x}});
+    }
+    return r;
+}
+
+// Alternating 100 +- d: S = 32 * 100, std exactly d.
+static_assert(gcore::window_sums(alternating(90, 110)).gyro.s[0] == 3200);
+static_assert(gcore::window_sums(alternating(90, 110)).accel.q[2] == 16LL * (8100 + 12100));
+// spread: std < th, strictly.
+static_assert(gcore::spread_ok(gcore::window_sums(alternating(90, 110)).gyro, 11));
+static_assert(!gcore::spread_ok(gcore::window_sums(alternating(90, 110)).gyro, 10));
+// Extremes stay in int64: std 32767.5 at full scale.
+static_assert(!gcore::spread_ok(gcore::window_sums(alternating(-32768, 32767)).gyro, 32767));
+static_assert(gcore::spread_ok(gcore::window_sums(alternating(-32768, 32767)).gyro, 32768));
+// rate: |mean - bias| < th, strictly. Mean 100.
+constexpr gcore::Sums mean100 = gcore::window_sums(alternating(90, 110)).gyro;
+static_assert(gcore::rate_ok(mean100, {0, 0, 0}, 101) && !gcore::rate_ok(mean100, {0, 0, 0}, 100));
+static_assert(gcore::rate_ok(mean100, {25600, 25600, 25600}, 1)); // bias 100.0
+static_assert(gcore::rate_ok(mean100, {25600 - 255, 25600, 25600}, 1));
+static_assert(!gcore::rate_ok(mean100, {25600, 25600 + 256, 25600}, 1));
+static_assert(!gcore::rate_ok(mean100, {25600, 25600, -25600}, 200));
+
+// Bias: 1/64 of the way to the window mean, rounded; only under the bias thresholds.
+constexpr std::array<std::int32_t, 3> biased(gcore::Ring r, std::array<std::int32_t, 3> b,
+                                             std::uint16_t th) {
+    gc_config cfg{};
+    cfg.bias_gyro_std_lsb = th;
+    cfg.bias_accel_std_lsb = th;
+    gcore::update_bias(b, gcore::window_sums(r), cfg);
+    return b;
+}
+static_assert(biased(alternating(90, 110), {0, 2560, 25600}, 11) ==
+              std::array<std::int32_t, 3>{400, 2560 + 360, 25600});
+static_assert(biased(alternating(90, 110), {0, 0, -1}, 10) ==
+              std::array<std::int32_t, 3>{0, 0, -1});
+// rdiv on both: mean 100.5 * 256 = 25728; (25728 - 25600) / 64 = 2; -(32 / 64) rounds to -1.
+static_assert(biased(alternating(100, 101), {25600, 25760, 0}, 1) ==
+              std::array<std::int32_t, 3>{25602, 25759, 402});
+
 // --- gc_init through the C ABI ------------------------------------------------------
 
 void test_init(gesture_test::Tests& t) {
@@ -155,10 +235,160 @@ void test_init(gesture_test::Tests& t) {
     check(t, gc_init(&s, &cfg) == GC_OK); // usable again after an error
 }
 
+// --- gc_feed: the state machine -------------------------------------------------------
+
+constexpr std::uint32_t period_us = 9600;
+
+struct Feeder {
+    gc_state s{};
+    std::uint32_t t = 1000;
+
+    explicit Feeder(const gc_config& cfg) {
+        gc_init(&s, &cfg);
+    }
+
+    gc_event feed(std::array<std::int16_t, 3> gyro, std::array<std::int16_t, 3> accel,
+                  std::uint32_t dt = period_us) {
+        t += dt;
+        const gc_sample in{.t_us = t,
+                           .gyro = {gyro[0], gyro[1], gyro[2]},
+                           .accel = {accel[0], accel[1], accel[2]}};
+        return gc_feed(&s, &in);
+    }
+
+    // Board at rest: flat, 1 g on z at 4 g full scale, gyro at the bias.
+    gc_event rest(std::uint32_t dt = period_us) {
+        return feed({0, 0, 0}, {0, 0, 8197}, dt);
+    }
+
+    // Feeds rest samples until an event; returns its 1-based sample count, 0 if none in n.
+    int rest_until_event(int n, gc_event& ev) {
+        for (int i = 1; i <= n; ++i) {
+            ev = rest();
+            if (ev.kind != GC_EV_NONE) {
+                return i;
+            }
+        }
+        return 0;
+    }
+
+    [[nodiscard]] const gcore::State& st() const {
+        return gcore::state(&s);
+    }
+};
+
+bool is(const gc_event& ev, std::uint8_t kind, std::uint8_t state, std::uint8_t reason = 0) {
+    return ev.kind == kind && ev.state == state && ev.reason == reason && ev.reserved == 0 &&
+           ev.points == 0 && ev.v_end_mm_s == 0 && ev.duration_us == 0;
+}
+
+// The first window is full at sample win_n; hold_n quiet windows later it is READY.
+constexpr int ready_at = gcore::win_n + 20 - 1;
+
+void test_warmup(gesture_test::Tests& t) {
+    Feeder f(valid_config());
+    gc_event ev{};
+    check(t, f.rest_until_event(200, ev) == ready_at);
+    check(t, is(ev, GC_EV_READY, GC_ST_STILL));
+    check(t, is(f.rest(), GC_EV_NONE, GC_ST_STILL));
+
+    // A tremor above the gyro std threshold (171) never confirms a hold.
+    Feeder g(valid_config());
+    bool none = true;
+    for (int i = 0; i < 200; ++i) {
+        const auto x = static_cast<std::int16_t>(i % 2 == 0 ? 172 : -172);
+        none = none && is(g.feed({x, 0, 0}, {0, 0, 8197}), GC_EV_NONE, GC_ST_WARMUP);
+    }
+    check(t, none);
+    // So does a steady turn: gyro z at the rate threshold (229) above the bias.
+    Feeder h(valid_config());
+    none = true;
+    for (int i = 0; i < 200; ++i) {
+        none = none && is(h.feed({0, 0, 229}, {0, 0, 8197}), GC_EV_NONE, GC_ST_WARMUP);
+    }
+    check(t, none);
+    // One LSB below it is quiet.
+    Feeder k(valid_config());
+    int n = 0;
+    while (n < 200 && k.feed({0, 0, 228}, {0, 0, 8197}).kind == GC_EV_NONE) {
+        ++n;
+    }
+    check(t, n + 1 == ready_at);
+}
+
+void test_moving(gesture_test::Tests& t) {
+    Feeder f(valid_config());
+    gc_event ev{};
+    f.rest_until_event(200, ev);
+    // A jolt that pushes the window's accel x std over 123 LSB starts a move at once.
+    check(t, is(f.feed({0, 0, 0}, {1000, 0, 8197}), GC_EV_MOVING, GC_ST_MOVING));
+    check(t, is(f.rest(), GC_EV_NONE, GC_ST_MOVING));
+    check(t, f.st().streak == 0); // the jolt is still in the window
+}
+
+void test_gap(gesture_test::Tests& t) {
+    gc_event ev{};
+    // dt 0, dt > max_dt: a gap restarts the warmup (silently outside MOVING).
+    for (const std::uint32_t dt : {0U, 14424U}) {
+        Feeder f(valid_config());
+        f.rest_until_event(200, ev);
+        check(t, is(f.rest(dt), GC_EV_NONE, GC_ST_WARMUP));
+        check(t, f.st().ring.count == 1 && f.st().streak == 0);
+        check(t, f.rest_until_event(200, ev) == ready_at - 1);
+    }
+    // max_dt itself is a step, not a gap.
+    Feeder f(valid_config());
+    f.rest_until_event(200, ev);
+    check(t, is(f.rest(14423), GC_EV_NONE, GC_ST_STILL));
+    // In MOVING a gap rejects the move.
+    f.feed({0, 0, 0}, {1000, 0, 8197});
+    check(t, is(f.rest(30000), GC_EV_REJECTED, GC_ST_WARMUP, GC_REJ_TIME_GAP));
+    check(t, is(f.rest(), GC_EV_NONE, GC_ST_WARMUP));
+    // The MCU clock wraps: no gap across 2^32.
+    Feeder w(valid_config());
+    w.t = 0xFFFFFFFFU - (10 * period_us);
+    check(t, w.rest_until_event(200, ev) == ready_at);
+}
+
+void test_bias(gesture_test::Tests& t) {
+    // Gyro x steady at 10 LSB: within every threshold. No update in WARMUP, then 1/64
+    // of the remaining distance per STILL sample.
+    gc_config cfg = valid_config();
+    Feeder f(cfg);
+    for (int i = 1; i < ready_at; ++i) {
+        f.feed({10, 0, 0}, {0, 0, 8197});
+    }
+    check(t, f.st().bias_q8[0] == 0);
+    check(t, is(f.feed({10, 0, 0}, {0, 0, 8197}), GC_EV_READY, GC_ST_STILL));
+    check(t, f.st().bias_q8[0] == 0); // the READY sample was still WARMUP at step 4
+    f.feed({10, 0, 0}, {0, 0, 8197});
+    check(t, f.st().bias_q8[0] == 40); // rdiv(2560, 64)
+    f.feed({10, 0, 0}, {0, 0, 8197});
+    check(t, f.st().bias_q8[0] == 40 + 39); // rdiv(2520, 64) = 39.375
+    for (int i = 0; i < 1000; ++i) {
+        f.feed({10, 0, 0}, {0, 0, 8197});
+    }
+    // Converges to within the rounding dead band: |d| / 64 rounds to 0 for |d| < 32.
+    check(t, f.st().bias_q8[0] > 2560 - 32 && f.st().bias_q8[0] <= 2560);
+    check(t, f.st().bias_q8[1] == 0 && f.st().bias_q8[2] == 0);
+
+    // Above the bias thresholds (still quiet): no update.
+    Feeder g(cfg);
+    for (int i = 0; i < ready_at + 50; ++i) {
+        const auto x = static_cast<std::int16_t>(i % 2 == 0 ? 12 : -12); // std 12 > 11
+        g.feed({x, 0, 0}, {0, 0, 8197});
+    }
+    check(t, g.st().mode == GC_ST_STILL && g.st().bias_q8[0] == 0);
+}
+
 } // namespace
 
 int main() {
     gesture_test::Tests t;
     test_init(t);
+    test_warmup(t);
+    test_moving(t);
+    test_gap(t);
+    test_bias(t);
     return gesture_test::finish(t, "core_test");
 }

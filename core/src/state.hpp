@@ -5,6 +5,7 @@
 // values); everything refers to the ring and points by index.
 
 #include "gesture/core.h"
+#include "ring.hpp"
 
 #include <array>
 #include <cstddef>
@@ -19,7 +20,11 @@ struct State {
     std::int32_t sa;                     // accel ug/LSB
     std::int32_t sg;                     // gyro udps/LSB
     std::array<std::int32_t, 3> bias_q8; // gyro bias, LSB x 256
-    std::uint8_t mode;                   // GC_ST_*
+    Ring ring;
+    std::uint32_t t_prev; // t_us of the previous sample
+    bool fed;             // a sample came since gc_init (else dt is undefined: a gap)
+    std::uint16_t streak; // quiet windows in a row, saturating
+    std::uint8_t mode;    // GC_ST_*
 };
 
 static_assert(sizeof(State) <= GC_STATE_SIZE);

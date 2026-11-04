@@ -3,6 +3,7 @@
 
 mod calib;
 mod check;
+mod events;
 mod path;
 mod stats;
 
@@ -64,18 +65,13 @@ enum Command {
     },
     /// Stroke paths (hold -> move -> hold): streaming float reference of `docs/core.md`.
     Path {
-        /// Session file (`.bin`).
-        file: PathBuf,
-        /// Tumble session to calibrate the accelerometer with (`calib`).
-        #[arg(long)]
-        calib: Option<PathBuf>,
-        /// Still thresholds: on a table or in the hand.
-        #[arg(long, value_enum, default_value_t = Hold::Hand)]
-        hold: Hold,
-        /// Rest session (`.bin`) giving the initial gyro bias [default: this session's
-        /// median].
-        #[arg(long)]
-        bias: Option<PathBuf>,
+        #[command(flatten)]
+        reference: ReferenceArgs,
+    },
+    /// Events of the integer core (`core/` via FFI) on a session, configured as `path`.
+    Events {
+        #[command(flatten)]
+        reference: ReferenceArgs,
     },
     Record {
         #[command(flatten)]
@@ -92,6 +88,68 @@ enum Command {
         #[arg(long)]
         dir: Option<PathBuf>,
     },
+}
+
+/// A session and how to configure the core for it (`path`, `events`).
+#[derive(Debug, Args)]
+struct ReferenceArgs {
+    /// Session file (`.bin`).
+    file: PathBuf,
+    /// Tumble session to calibrate the accelerometer with (`calib`).
+    #[arg(long)]
+    calib: Option<PathBuf>,
+    /// Still thresholds: on a table or in the hand.
+    #[arg(long, value_enum, default_value_t = Hold::Hand)]
+    hold: Hold,
+    /// Rest session (`.bin`) giving the initial gyro bias [default: this session's
+    /// median].
+    #[arg(long)]
+    bias: Option<PathBuf>,
+}
+
+fn load(p: &Path) -> anyhow::Result<stats::Recording> {
+    let bytes = fs::read(p).with_context(|| format!("reading {}", p.display()))?;
+    stats::load(&bytes)
+}
+
+/// The session, its config, and a line saying where the config came from.
+fn reference_config(
+    ReferenceArgs {
+        file,
+        calib,
+        hold,
+        bias,
+    }: &ReferenceArgs,
+) -> anyhow::Result<(stats::Recording, path::Config, String)> {
+    let fit = calib
+        .as_deref()
+        .map(|c| calib::fit_session(&load(c)?))
+        .transpose()?;
+    let rec = load(file)?;
+    // The initial gyro bias, as a caller would measure it: a rest session's mean,
+    // else this session's median (mostly still).
+    let bias_dps = match bias {
+        Some(b) => stats::mean(&stats::scaled(&load(b)?)?.gyro),
+        None => stats::median(&stats::scaled(&rec)?.gyro),
+    };
+    let still = match hold {
+        Hold::Hand => calib::HAND,
+        Hold::Table => calib::TABLE,
+    };
+    let cfg = path::Config::new(&rec, fit.as_ref(), bias_dps, still)?;
+    let about = format!(
+        "accel {}, gyro bias {:.2} {:.2} {:.2} dps ({}), {hold:?} thresholds\n",
+        if fit.is_some() { "calibrated" } else { "raw" },
+        bias_dps[0],
+        bias_dps[1],
+        bias_dps[2],
+        if bias.is_some() {
+            "rest session"
+        } else {
+            "this session's median"
+        }
+    );
+    Ok((rec, cfg, about))
 }
 
 /// Where the board rests between strokes.
@@ -371,42 +429,16 @@ fn main() -> anyhow::Result<()> {
             print!("{}", stats::timeline(&stats::load(&bytes)?, window)?);
             Ok(())
         }
-        Command::Path {
-            file,
-            calib,
-            hold,
-            bias,
-        } => {
-            let load = |p: &Path| -> anyhow::Result<stats::Recording> {
-                let bytes = fs::read(p).with_context(|| format!("reading {}", p.display()))?;
-                stats::load(&bytes)
-            };
-            let fit = calib.map(|c| calib::fit_session(&load(&c)?)).transpose()?;
-            let rec = load(&file)?;
-            // The initial gyro bias, as a caller would measure it: a rest session's mean,
-            // else this session's median (mostly still).
-            let bias_dps = match &bias {
-                Some(b) => stats::mean(&stats::scaled(&load(b)?)?.gyro),
-                None => stats::median(&stats::scaled(&rec)?.gyro),
-            };
-            let still = match hold {
-                Hold::Hand => calib::HAND,
-                Hold::Table => calib::TABLE,
-            };
-            let cfg = path::Config::new(&rec, fit.as_ref(), bias_dps, still)?;
-            println!(
-                "accel {}, gyro bias {:.2} {:.2} {:.2} dps ({}), {hold:?} thresholds\n",
-                if fit.is_some() { "calibrated" } else { "raw" },
-                bias_dps[0],
-                bias_dps[1],
-                bias_dps[2],
-                if bias.is_some() {
-                    "rest session"
-                } else {
-                    "this session's median"
-                }
-            );
+        Command::Path { reference } => {
+            let (rec, cfg, about) = reference_config(&reference)?;
+            println!("{about}");
             print!("{}", path::report(&rec, &cfg)?);
+            Ok(())
+        }
+        Command::Events { reference } => {
+            let (rec, cfg, about) = reference_config(&reference)?;
+            println!("{about}");
+            print!("{}", events::report(&rec, &cfg.gc())?);
             Ok(())
         }
         Command::Record {
