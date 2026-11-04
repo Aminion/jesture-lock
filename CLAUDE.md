@@ -40,7 +40,8 @@ Flash one or the other. Results of both paths on the same recording must match b
     `gesture_core_abi`), its C11 check, the vector runner (`tests/`) and the conformance
     vectors, one directory per ABI version (`vectors/v1/`).
   - `core/cpp/`: the C++ implementation (`gesture_core`, internal headers in `src/`, unit
-    tests in `tests/`). Callers link `gesture_core`, whichever implementation provides it.
+    tests in `tests/`). Callers link `gesture_core`, whichever implementation provides it
+    (CMake option `GESTURE_CORE_IMPL`, a directory under `core/`; same env variable for cargo).
 - `proto/`: protocol framing (COBS, CRC16), no hardware dependencies. Builds for host and MCU;
   `host/crates/protocol` mirrors it.
 - `firmware/board/`: clocks, pins, I2C/UART/LSM6DS3 drivers. Register-free logic (ring buffer,

@@ -149,10 +149,13 @@ host or the firmware.
    bias update 11 (0.2 dps), 16 (2 mg); clip 32700; max_dt 14423 us; stroke
    150000..4000000 us; min extent 20 mm; max v_end 300 mm/s; calibration from
    `tumble-4g`, bias from `rest-table-4g`.
-3. [ ] Build: the `gesture-core` build.rs and the firmware link "a static lib
-   `gesture_core` providing `core.h`"; the implementation is one build option.
-   build.rs already builds `core/` via the `cmake` crate and links `gesture_core`
-   statically; the option is still missing.
+3. [x] Build option `GESTURE_CORE_IMPL` (`core/CMakeLists.txt`, default `cpp`): a directory
+   under `core/` that defines the static library `gesture_core` linking `gesture_core_abi`
+   (built by CMake, or IMPORTED GLOBAL from another toolchain), checked at configure.
+   The firmware and `core_vectors` link `gesture_core`; the implementation's own unit
+   tests, if any, live in `<dir>/tests`. `gesture-core` build.rs passes the environment
+   variable of the same name. Checked with a copy of `cpp` changed by one LSB in v_end:
+   `core_vectors` and the cargo vector tests fail on it.
 
 ### 3d: host tools
 
