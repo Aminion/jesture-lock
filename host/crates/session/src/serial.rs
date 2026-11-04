@@ -7,7 +7,7 @@ use anyhow::Context;
 use clap::Args;
 use serialport::{ClearBuffer, SerialPort};
 
-#[derive(Debug, Args)]
+#[derive(Debug, Clone, Args)]
 pub struct PortArgs {
     /// Serial device of the ST-LINK virtual COM port.
     #[arg(long, default_value = "/dev/ttyACM0")]
@@ -33,6 +33,13 @@ pub fn open(PortArgs { port, baud }: &PortArgs) -> anyhow::Result<Box<dyn Serial
         .dtr_on_open(false)
         .open()
         .with_context(|| format!("opening {port}"))
+}
+
+/// Serial ports present now, by name (the ST-LINK is a `/dev/ttyACM*` on Linux).
+pub fn ports() -> Vec<String> {
+    serialport::available_ports()
+        .map(|ps| ps.into_iter().map(|p| p.port_name).collect())
+        .unwrap_or_default()
 }
 
 /// Reads what is available into `buf`; 0 if nothing came within the port timeout.

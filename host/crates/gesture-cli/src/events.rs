@@ -98,7 +98,7 @@ mod tests {
     fn both(name: &str) -> (Kinds, Kinds) {
         let rec = load(name);
         let bias = recording::median(&recording::scaled(&rec).expect("scales").gyro);
-        let cfg = Config::new(&rec, None, bias, HAND).expect("config");
+        let cfg = Config::new(&rec.hello, None, bias, HAND).expect("config");
         let ints = run(&rec, &cfg.gc())
             .expect("gc_init")
             .into_iter()
@@ -120,7 +120,7 @@ mod tests {
     fn first_path(name: &str) -> Vec<(GcPoint, (u64, [f64; 3]))> {
         let rec = load(name);
         let bias = recording::median(&recording::scaled(&rec).expect("scales").gyro);
-        let cfg = Config::new(&rec, None, bias, HAND).expect("config");
+        let cfg = Config::new(&rec.hello, None, bias, HAND).expect("config");
         let gc = cfg.gc();
         let mut ints = Core::new(&gc).expect("gc_init");
         let mut floats = path::Core::new(&cfg);
@@ -260,7 +260,7 @@ mod tests {
         for name in &names {
             let rec = load(name);
             let bias = recording::median(&recording::scaled(&rec).expect("scales").gyro);
-            let cfg = Config::new(&rec, None, bias, HAND).expect("config");
+            let cfg = Config::new(&rec.hello, None, bias, HAND).expect("config");
             let (ints, floats) = full_events(&rec, &cfg);
             if ints.len() != floats.len() {
                 bad.push(format!("{name}: {} events vs {}", ints.len(), floats.len()));

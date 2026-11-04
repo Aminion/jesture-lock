@@ -47,7 +47,7 @@ pub struct Segment {
     pub gyro: V3,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 /// Offset (g) and gain per axis: true = (raw - offset) * gain.
 pub struct Fit {
     pub offset: V3,

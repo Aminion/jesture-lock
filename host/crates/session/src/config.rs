@@ -5,9 +5,10 @@
 
 use anyhow::Context;
 use gesture_core::ffi::{GC_ABI_VERSION, GcConfig};
+use protocol::Hello;
 
 use crate::calib::{Fit, Still};
-use crate::recording::{Recording, V3};
+use crate::recording::V3;
 
 // docs/core.md, gc_config defaults that are not still thresholds.
 pub const HOLD_N: u32 = 20;
@@ -40,29 +41,25 @@ pub struct Config {
 impl Config {
     /// `bias_dps`: the initial gyro bias; `fit`: accel calibration (none: offset 0, gain 1).
     pub fn new(
-        rec: &Recording,
+        hello: &Hello,
         fit: Option<&Fit>,
         bias_dps: V3,
         still: Still,
     ) -> anyhow::Result<Self> {
         let sa = f64::from(
-            rec.hello
+            hello
                 .accel_ug_per_lsb()
                 .context("accelerometer not configured")?,
         );
-        let sg = f64::from(
-            rec.hello
-                .gyro_udps_per_lsb()
-                .context("gyro not configured")?,
-        );
+        let sg = f64::from(hello.gyro_udps_per_lsb().context("gyro not configured")?);
         // Already in the integer formats of gc_config (whole LSB, Q30 gain, LSB x 256
         // bias), so this reference and the integer core decide on the same numbers.
         let gyro_lsb = |dps: f64| (dps * 1e6 / sg).round();
         let accel_lsb = |mg: f64| (mg * 1e3 / sa).round();
         let q30 = f64::from(1u32 << 30);
         Ok(Self {
-            ctrl1_xl: rec.hello.ctrl1_xl,
-            ctrl2_g: rec.hello.ctrl2_g,
+            ctrl1_xl: hello.ctrl1_xl,
+            ctrl2_g: hello.ctrl2_g,
             sa,
             sg,
             offset_lsb: fit.map_or([0.0; 3], |f| f.offset.map(|g| (g * 1e6 / sa).round())),

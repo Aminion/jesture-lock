@@ -225,9 +225,7 @@ pub fn session_vector(data: &Path, session: &str, n: Option<usize>) -> anyhow::R
     let dir = data.join("sessions");
     let (rec, cfg, _) = session::reference::reference_config(&session::reference::ReferenceArgs {
         file: dir.join(format!("{session}.bin")),
-        calib: Some(dir.join("20261030-205757_tumble.bin")),
-        hold: session::reference::Hold::Hand,
-        bias: Some(dir.join("20261030-183544_rest-table.bin")),
+        core: session::reference::CoreArgs::vectors(&dir),
     })?;
     let n = n.unwrap_or(rec.samples.len());
     build(&rec, &cfg.gc(), n)
