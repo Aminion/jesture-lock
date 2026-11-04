@@ -11,7 +11,7 @@ use std::fmt::Write as _;
 use anyhow::{Context, bail};
 use gesture_core::{Core, Event, GcConfig, GcPoint, GcSample, Kind, Stroke};
 
-use crate::stats::Recording;
+use session::recording::Recording;
 
 /// One accepted stroke, summed up from `gc_stroke`.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -195,13 +195,14 @@ mod tests {
     #[test]
     fn ruler_30_strokes_are_about_30_cm_along_x() {
         let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../data/sessions");
-        let (rec, cfg, _) = crate::reference_config(&crate::ReferenceArgs {
-            file: dir.join("20261030-211435_ruler-30.bin"),
-            calib: Some(dir.join("20261030-205757_tumble.bin")),
-            hold: crate::Hold::Hand,
-            bias: Some(dir.join("20261030-183544_rest-table.bin")),
-        })
-        .expect("config");
+        let (rec, cfg, _) =
+            session::reference::reference_config(&session::reference::ReferenceArgs {
+                file: dir.join("20261030-211435_ruler-30.bin"),
+                calib: Some(dir.join("20261030-205757_tumble.bin")),
+                hold: session::reference::Hold::Hand,
+                bias: Some(dir.join("20261030-183544_rest-table.bin")),
+            })
+            .expect("config");
         let long: Vec<Summary> = run(&rec, &cfg.gc())
             .expect("run")
             .into_iter()

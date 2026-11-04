@@ -2,7 +2,6 @@
 //! through the host build of core/, and compare against the recognize firmware's events.
 
 mod calib;
-mod check;
 mod events;
 mod path;
 mod stats;
@@ -11,16 +10,17 @@ mod synth;
 mod vector;
 
 use std::fs::{self, File};
-use std::io::{BufWriter, ErrorKind, Write};
+use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, bail};
-use clap::{Args, Parser, Subcommand, ValueEnum};
+use clap::{Parser, Subcommand};
 use protocol::{Deframer, Message};
-use serialport::{ClearBuffer, SerialPort};
-
-use crate::check::Stats;
+use session::check::Stats;
+use session::recording;
+use session::reference::{ReferenceArgs, reference_config};
+use session::serial::{self, PortArgs, READ_BUF};
 
 #[derive(Debug, Parser)]
 #[command(version, about)]
@@ -121,114 +121,8 @@ enum Command {
     },
 }
 
-/// A session and how to configure the core for it (`path`, `events`, `strokes`).
-#[derive(Debug, Args)]
-struct ReferenceArgs {
-    /// Session file (`.bin`).
-    file: PathBuf,
-    /// Tumble session to calibrate the accelerometer with (`calib`).
-    #[arg(long)]
-    calib: Option<PathBuf>,
-    /// Still thresholds: on a table or in the hand.
-    #[arg(long, value_enum, default_value_t = Hold::Hand)]
-    hold: Hold,
-    /// Rest session (`.bin`) giving the initial gyro bias [default: this session's
-    /// median].
-    #[arg(long)]
-    bias: Option<PathBuf>,
-}
-
-fn load(p: &Path) -> anyhow::Result<stats::Recording> {
-    let bytes = fs::read(p).with_context(|| format!("reading {}", p.display()))?;
-    stats::load(&bytes)
-}
-
-/// The session, its config, and a line saying where the config came from.
-fn reference_config(
-    ReferenceArgs {
-        file,
-        calib,
-        hold,
-        bias,
-    }: &ReferenceArgs,
-) -> anyhow::Result<(stats::Recording, path::Config, String)> {
-    let fit = calib
-        .as_deref()
-        .map(|c| calib::fit_session(&load(c)?))
-        .transpose()?;
-    let rec = load(file)?;
-    // The initial gyro bias, as a caller would measure it: a rest session's mean,
-    // else this session's median (mostly still).
-    let bias_dps = match bias {
-        Some(b) => stats::mean(&stats::scaled(&load(b)?)?.gyro),
-        None => stats::median(&stats::scaled(&rec)?.gyro),
-    };
-    let still = match hold {
-        Hold::Hand => calib::HAND,
-        Hold::Table => calib::TABLE,
-    };
-    let cfg = path::Config::new(&rec, fit.as_ref(), bias_dps, still)?;
-    let about = format!(
-        "accel {}, gyro bias {:.2} {:.2} {:.2} dps ({}), {hold:?} thresholds\n",
-        if fit.is_some() { "calibrated" } else { "raw" },
-        bias_dps[0],
-        bias_dps[1],
-        bias_dps[2],
-        if bias.is_some() {
-            "rest session"
-        } else {
-            "this session's median"
-        }
-    );
-    Ok((rec, cfg, about))
-}
-
-/// Where the board rests between strokes.
-#[derive(Clone, Copy, Debug, ValueEnum)]
-enum Hold {
-    Hand,
-    Table,
-}
-
-#[derive(Debug, Args)]
-struct PortArgs {
-    /// Serial device of the ST-LINK virtual COM port.
-    #[arg(long, default_value = "/dev/ttyACM0")]
-    port: String,
-    #[arg(long, default_value_t = protocol::BAUD)]
-    baud: u32,
-}
-
-/// Read chunk size; the port timeout, not the buffer, paces the loops.
-const READ_BUF: usize = 256;
-
-/// How long one read waits for bytes before returning none.
-const PORT_TIMEOUT: Duration = Duration::from_millis(100);
-
-/// How long to discard input after opening: the ST-LINK hands over what it buffered
-/// while the port was closed (seen: ~117 s of an old stream) in the first reads.
-const SETTLE: Duration = Duration::from_millis(300);
-
 /// How often `check` prints a progress line (PC time: it only paces the output).
 const REPORT_EVERY: Duration = Duration::from_secs(1);
-
-fn open(PortArgs { port, baud }: &PortArgs) -> anyhow::Result<Box<dyn SerialPort>> {
-    serialport::new(port, *baud)
-        .timeout(PORT_TIMEOUT)
-        // Asserting DTR on open resets the MCU through the ST-LINK (seen on this Nucleo).
-        .dtr_on_open(false)
-        .open()
-        .with_context(|| format!("opening {port}"))
-}
-
-/// Reads what is available into `buf`; 0 if nothing came within the port timeout.
-fn read_some(serial: &mut dyn SerialPort, buf: &mut [u8]) -> anyhow::Result<usize> {
-    match serial.read(buf) {
-        Ok(n) => Ok(n),
-        Err(e) if e.kind() == ErrorKind::TimedOut => Ok(0),
-        Err(e) => Err(e).with_context(|| format!("reading {}", serial.name().unwrap_or_default())),
-    }
-}
 
 /// Feeds one deframed frame to `stats`, printing events (and messages if `print`).
 fn handle(stats: &mut Stats, frame: Result<Vec<u8>, protocol::FrameError>, print: bool) {
@@ -293,20 +187,16 @@ fn read_stream(
     print: bool,
     mut sink: Option<&mut dyn Write>,
 ) -> anyhow::Result<Stats> {
-    let mut serial = open(port)?;
-    serial.clear(ClearBuffer::Input)?;
+    let mut serial = serial::open(port)?;
+    serial::settle(serial.as_mut())?;
     let mut buf = [0u8; READ_BUF];
-    let settle = Instant::now();
-    while settle.elapsed() < SETTLE {
-        read_some(serial.as_mut(), &mut buf)?;
-    }
     let mut deframer = Deframer::new();
     let mut stats = Stats::new();
     let start = Instant::now();
     let duration = Duration::from_secs(seconds);
     let mut next_report = REPORT_EVERY;
     while start.elapsed() < duration {
-        let n = read_some(serial.as_mut(), &mut buf)?;
+        let n = serial::read_some(serial.as_mut(), &mut buf)?;
         if let Some(sink) = sink.as_mut() {
             sink.write_all(&buf[..n])?;
         }
@@ -447,17 +337,17 @@ fn main() -> anyhow::Result<()> {
         } => check(&port, seconds, print),
         Command::Stats { file } => {
             let bytes = fs::read(&file).with_context(|| format!("reading {}", file.display()))?;
-            print!("{}", stats::report(&stats::load(&bytes)?)?);
+            print!("{}", stats::report(&recording::load(&bytes)?)?);
             Ok(())
         }
         Command::Calib { file } => {
             let bytes = fs::read(&file).with_context(|| format!("reading {}", file.display()))?;
-            print!("{}", calib::report(&stats::load(&bytes)?)?);
+            print!("{}", calib::report(&recording::load(&bytes)?)?);
             Ok(())
         }
         Command::Timeline { file, window } => {
             let bytes = fs::read(&file).with_context(|| format!("reading {}", file.display()))?;
-            print!("{}", stats::timeline(&stats::load(&bytes)?, window)?);
+            print!("{}", stats::timeline(&recording::load(&bytes)?, window)?);
             Ok(())
         }
         Command::Path { reference } => {

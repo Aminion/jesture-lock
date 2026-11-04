@@ -1402,7 +1402,7 @@ dependencies = [
  "gesture-core",
  "jiff",
  "protocol",
- "serialport",
+ "session",
 ]
 
 [[package]]
@@ -3181,6 +3181,17 @@ dependencies = [
  "scopeguard",
  "unescaper",
  "windows-sys 0.52.0",
+]
+
+[[package]]
+name = "session"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "gesture-core",
+ "protocol",
+ "serialport",
 ]
 
 [[package]]

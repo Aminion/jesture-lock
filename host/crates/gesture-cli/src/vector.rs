@@ -28,7 +28,7 @@ use anyhow::{Context, ensure};
 use gesture_core::ffi::GcEvent;
 use gesture_core::{Core, GcConfig, GcPoint, GcSample, GcStrokeInfo, Kind, Stroke};
 
-use crate::stats::Recording;
+use session::recording::Recording;
 
 pub const MAGIC: [u8; 4] = *b"GCV1";
 const HEADER: usize = 84;
@@ -223,10 +223,10 @@ pub const SESSIONS: &[(&str, &str, Option<usize>)] = &[
 /// Builds the vector of `SESSIONS` entry `(_, session, n)` from the sessions in `data`.
 pub fn session_vector(data: &Path, session: &str, n: Option<usize>) -> anyhow::Result<Vec<u8>> {
     let dir = data.join("sessions");
-    let (rec, cfg, _) = crate::reference_config(&crate::ReferenceArgs {
+    let (rec, cfg, _) = session::reference::reference_config(&session::reference::ReferenceArgs {
         file: dir.join(format!("{session}.bin")),
         calib: Some(dir.join("20261030-205757_tumble.bin")),
-        hold: crate::Hold::Hand,
+        hold: session::reference::Hold::Hand,
         bias: Some(dir.join("20261030-183544_rest-table.bin")),
     })?;
     let n = n.unwrap_or(rec.samples.len());

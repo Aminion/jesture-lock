@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/protocol", "crates/gesture-core", "crates/gesture-cli", "crates/viewer"]
+members = ["crates/protocol", "crates/gesture-core", "crates/session", "crates/gesture-cli", "crates/viewer"]
 
 [workspace.package]
 version = "0.1.0"
@@ -11,6 +11,7 @@ publish = false
 [workspace.dependencies]
 protocol = { path = "crates/protocol" }
 gesture-core = { path = "crates/gesture-core" }
+session = { path = "crates/session" }
 
 [workspace.lints.rust]
 unsafe_op_in_unsafe_fn = "deny"

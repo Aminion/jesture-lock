@@ -51,7 +51,8 @@ Flash one or the other. Results of both paths on the same recording must match b
 - `test_support/`: shared helpers for the host test executables (`gesture/test/check.hpp`).
 - C++ public headers use one prefix: `gesture/core.h`, `gesture/proto/`, `gesture/board/`,
   `gesture/test/`.
-- `host/`: Rust workspace: `protocol`, `gesture-core` (FFI), `gesture-cli`, `viewer`.
+- `host/`: Rust workspace: `protocol`, `gesture-core` (FFI), `session` (recordings, serial
+  port, stream health, calibration, the core's config: shared by the tools), `gesture-cli`, `viewer`.
 - `docs/`: `protocol.md` (the C++/Rust contract), `core.md` (the `core.h` contract, Step 3b),
   `template_format.md`, `pinout.md` (MCU pins and IMU wiring),
   `todo.md` (current step plan, deferred adjustments),

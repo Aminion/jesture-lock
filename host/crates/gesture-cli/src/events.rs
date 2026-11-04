@@ -7,7 +7,7 @@ use std::fmt::Write as _;
 use anyhow::{Context, bail};
 use gesture_core::{Core, Event, GcConfig, GcSample};
 
-use crate::stats::Recording;
+use session::recording::Recording;
 
 /// The events of a recording: (sample index, event), `Kind::None` left out.
 pub fn run(rec: &Recording, cfg: &GcConfig) -> anyhow::Result<Vec<(usize, Event)>> {
@@ -47,15 +47,16 @@ mod tests {
     use gesture_core::{GcPoint, Kind, Reject};
 
     use super::*;
-    use crate::calib::HAND;
-    use crate::path::{self, MIN_EXTENT_MM, MIN_STROKE_US};
-    use crate::stats;
+    use crate::path;
+    use session::calib::HAND;
+    use session::config::{Config, MIN_EXTENT_MM, MIN_STROKE_US};
+    use session::recording;
 
     fn load(name: &str) -> Recording {
         let file = Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../../../data/sessions")
             .join(name);
-        stats::load(&std::fs::read(file).expect("session file")).expect("session")
+        recording::load(&std::fs::read(file).expect("session file")).expect("session")
     }
 
     /// (sample index, kind).
@@ -73,7 +74,7 @@ mod tests {
     }
 
     /// Events of the float reference.
-    fn reference(rec: &Recording, cfg: &path::Config) -> Kinds {
+    fn reference(rec: &Recording, cfg: &Config) -> Kinds {
         let mut core = path::Core::new(cfg);
         rec.samples
             .iter()
@@ -96,8 +97,8 @@ mod tests {
     /// session's median bias, no accel calibration).
     fn both(name: &str) -> (Kinds, Kinds) {
         let rec = load(name);
-        let bias = stats::median(&stats::scaled(&rec).expect("scales").gyro);
-        let cfg = path::Config::new(&rec, None, bias, HAND).expect("config");
+        let bias = recording::median(&recording::scaled(&rec).expect("scales").gyro);
+        let cfg = Config::new(&rec, None, bias, HAND).expect("config");
         let ints = run(&rec, &cfg.gc())
             .expect("gc_init")
             .into_iter()
@@ -118,8 +119,8 @@ mod tests {
     /// reference is in it: (t_100us, mm) of `gc_live` against the float position.
     fn first_path(name: &str) -> Vec<(GcPoint, (u64, [f64; 3]))> {
         let rec = load(name);
-        let bias = stats::median(&stats::scaled(&rec).expect("scales").gyro);
-        let cfg = path::Config::new(&rec, None, bias, HAND).expect("config");
+        let bias = recording::median(&recording::scaled(&rec).expect("scales").gyro);
+        let cfg = Config::new(&rec, None, bias, HAND).expect("config");
         let gc = cfg.gc();
         let mut ints = Core::new(&gc).expect("gc_init");
         let mut floats = path::Core::new(&cfg);
@@ -172,7 +173,7 @@ mod tests {
     /// extent only for `STROKE` (through `gc_stroke`), the float one at every end.
     type Full = (usize, Kind, u32, f64, Option<f64>);
 
-    fn full_events(rec: &Recording, cfg: &path::Config) -> (Vec<Full>, Vec<Full>) {
+    fn full_events(rec: &Recording, cfg: &Config) -> (Vec<Full>, Vec<Full>) {
         let gc = cfg.gc();
         let mut ints = Core::new(&gc).expect("gc_init");
         let mut floats = path::Core::new(cfg);
@@ -258,8 +259,8 @@ mod tests {
         let mut ends = 0;
         for name in &names {
             let rec = load(name);
-            let bias = stats::median(&stats::scaled(&rec).expect("scales").gyro);
-            let cfg = path::Config::new(&rec, None, bias, HAND).expect("config");
+            let bias = recording::median(&recording::scaled(&rec).expect("scales").gyro);
+            let cfg = Config::new(&rec, None, bias, HAND).expect("config");
             let (ints, floats) = full_events(&rec, &cfg);
             if ints.len() != floats.len() {
                 bad.push(format!("{name}: {} events vs {}", ints.len(), floats.len()));

@@ -1,5 +1,5 @@
 //! `check`: stream health from decoded messages (`docs/protocol.md` "Gaps"). No port
-//! access, so it is tested with made-up streams; `main` reads the port and feeds it.
+//! access, so it is tested with made-up streams; a caller (`gesture-cli check`, the viewer) reads the port and feeds it.
 //!
 //! Counting starts at the first `Hello`: bytes before it may be a stale backlog the
 //! ST-LINK kept from before the port was opened.

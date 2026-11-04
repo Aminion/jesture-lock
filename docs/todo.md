@@ -181,11 +181,16 @@ stroke numbers, buttons, event log), the 3D view as the main area, a collapsible
 below it. Built in this order, each step usable on its own; replay makes everything except
 the serial port testable without the board.
 
-1. [ ] Shared host crate (`session`): move out of `gesture-cli` what the viewer needs too,
+1. [x] Shared host crate (`session`): move out of `gesture-cli` what the viewer needs too,
    so there is one copy: recording load (`stats::Recording`), the serial port `open`,
    frame -> sample decoding, `reference_config` (calibration from `tumble`, bias from
    `rest-table`, hold thresholds -> `GcConfig`). A move only: `cargo test` and the vectors
    unchanged.
+   Modules: `recording`, `calib` (the fit; its report stays in the CLI), `config` (was
+   `path::Config`; the float algorithm stays in `path`), `check` (stream health, for the
+   top bar), `serial` (`open`, `read_some`, `settle`), `reference` (`ReferenceArgs`,
+   `Hold`, `reference_config`, clap args the viewer reuses). The outputs of `stats`,
+   `calib`, `timeline`, `path`, `events` and `strokes` are byte for byte the same.
 2. [ ] Input behind one interface, a worker thread that feeds `Core` and sends samples,
    events, live points and strokes to the UI over a channel:
    - replay of a `.bin` session (real time or faster, pause);
