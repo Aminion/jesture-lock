@@ -68,7 +68,7 @@ Calibration and thresholds are in LSB of the scale selected by `ctrl1_xl`/`ctrl2
 | 6      | uint16   | reserved0            | | 0 |
 | 8      | int16[3] | accel_offset_lsb     | per axis | |
 | 14     | uint16   | reserved1            | | 0 |
-| 16     | int32[3] | accel_gain_q30       | per axis, 1.0 = 2^30 | 0.9..1.1 |
+| 16     | int32[3] | accel_gain_q30       | per axis, 1.0 = 2^30 | 966367642..1181116006 (0.9..1.1) |
 | 28     | int32[3] | gyro_bias_q8         | initial bias, LSB x 256 | |
 | 40     | uint16   | still_gyro_std_lsb   | still: gyro std per axis below | >= 1 |
 | 42     | uint16   | still_accel_std_lsb  | still: accel std per axis below | >= 1 |
@@ -91,6 +91,8 @@ Calibration and thresholds are in LSB of the scale selected by `ctrl1_xl`/`ctrl2
 | 1     | `GC_ERR_VERSION` | `abi_version` wrong |
 | 2     | `GC_ERR_SCALE`   | an FS code not in the scale tables, or a ctrl value 0 |
 | 3     | `GC_ERR_CONFIG`  | another value outside "Valid" |
+
+Checked in this order; the first that fails is returned.
 
 ### `gc_event` (12 B)
 
@@ -206,8 +208,8 @@ sensitivity.)
 5. **State.**
    - `WARMUP`: streak >= hold_n -> `STILL`, event `READY`.
    - `STILL`: window not quiet -> start the stroke (below), `MOVING`, event `MOVING`.
-   - `MOVING`: integrate this sample (below). If the move is now longer than
-     max_stroke_us: `REJECTED(LONG)`, `WARMUP`. If the streak became 1: snapshot (v, p,
+   - `MOVING`: integrate this sample (below). If now `t - t_s0 > max_stroke_us`:
+     `REJECTED(LONG)`, `WARMUP`, and nothing else on this sample. If the streak became 1: snapshot (v, p,
      t, clipped flag). If it became 0: drop the snapshot. If it reached hold_n: end the
      stroke at the snapshot (below), `STILL`, event `STROKE` or `REJECTED`.
 
