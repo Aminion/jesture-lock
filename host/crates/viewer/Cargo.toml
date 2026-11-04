@@ -15,3 +15,6 @@ egui = "0.37.0"
 egui_plot = "0.38.0"
 gesture-core.workspace = true
 protocol.workspace = true
+anyhow = "1.0.104"
+clap = { version = "4.6.7", features = ["derive"] }
+session.workspace = true

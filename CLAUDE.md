@@ -52,7 +52,8 @@ Flash one or the other. Results of both paths on the same recording must match b
 - C++ public headers use one prefix: `gesture/core.h`, `gesture/proto/`, `gesture/board/`,
   `gesture/test/`.
 - `host/`: Rust workspace: `protocol`, `gesture-core` (FFI), `session` (recordings, serial
-  port, stream health, calibration, the core's config: shared by the tools), `gesture-cli`, `viewer`.
+  port, stream health, calibration, the core's config, per-stroke summary: shared by the
+  tools), `gesture-cli`, `viewer`.
 - `docs/`: `protocol.md` (the C++/Rust contract), `core.md` (the `core.h` contract, Step 3b),
   `template_format.md`, `pinout.md` (MCU pins and IMU wiring),
   `todo.md` (current step plan, deferred adjustments),
@@ -67,6 +68,8 @@ Flash one or the other. Results of both paths on the same recording must match b
 - Record and analyze (in `host/`): `cargo run -q -p gesture-cli -- record <label> --seconds N
   --note "..."`, then `stats`, `timeline`, `calib`, `path <file> --calib <tumble.bin>`, `events`, `strokes` on
   `../data/sessions/*.bin`
+- Viewer (in `host/`): `cargo run -q -p viewer -- [<file.bin> | --port /dev/ttyACM0] --calib
+  <tumble.bin> --bias <rest-table.bin>`
 
 ## Rules
 - `core/` has no I/O, no platform code, no clock access, no global state.

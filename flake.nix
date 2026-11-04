@@ -43,6 +43,7 @@
           # Runtime libraries eframe/winit load via dlopen.
           guiLibs = with pkgs; [
             libGL
+            vulkan-loader # wgpu, eframe's default renderer
             libxkbcommon
             wayland
             libx11

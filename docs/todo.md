@@ -191,13 +191,21 @@ the serial port testable without the board.
    top bar), `serial` (`open`, `read_some`, `settle`), `reference` (`ReferenceArgs`,
    `Hold`, `reference_config`, clap args the viewer reuses). The outputs of `stats`,
    `calib`, `timeline`, `path`, `events` and `strokes` are byte for byte the same.
-2. [ ] Input behind one interface, a worker thread that feeds `Core` and sends samples,
+2. [x] Input behind one interface, a worker thread that feeds `Core` and sends samples,
    events, live points and strokes to the UI over a channel:
    - replay of a `.bin` session (real time or faster, pause);
    - live serial: port list with refresh, connect / disconnect, decode with the `protocol`
      crate; rate, frame and error counters in the top bar.
    Configured by the same `--calib`, `--bias`, `--hold` arguments as `strokes` (file
    pickers later). Check: replay of ruler-30 gives the strokes `gesture-cli strokes` lists.
+   Done: `viewer/src/feed.rs` (frames -> `check::Stats` + `Core`, restarted on a new or
+   changed `Hello` and on an MCU reset), `source.rs` (replay paced by MCU time at 1x / 2x /
+   5x / max with pause; serial: `open`, `settle`, read loop; stop by dropping the handle).
+   `session` gained `CoreArgs` / `Setup` (config from a `Hello`, so live needs no recording),
+   `strokes` (`Summary`, `run`, moved from the CLI) and `serial::ports`. Live without
+   `--bias` starts from zero bias (the core updates it in holds). The test replays ruler-30
+   through the worker path and matches a direct core run sample by sample (events, live
+   points, strokes) and `strokes::run`. Not yet run against the board.
 3. [ ] State indicator: WARMUP / READY / MOVING, and the last event with its reject reason
    (`REJ SHORT`), so a missing stroke shows why. Event log in the side panel.
 4. [ ] Stroke capture, first as a plain 2D top view: while moving, the live path (`gc_live`,
