@@ -16,7 +16,7 @@ MEMORY
 }
 
 _estack = ORIGIN(RAM) + LENGTH(RAM);
-_Min_Stack_Size = 0x400;
+_Min_Stack_Size = 0x600; /* 1.5 KB: recognize self-test peak 1088 B (data/vectors/README.md) */
 
 SECTIONS
 {

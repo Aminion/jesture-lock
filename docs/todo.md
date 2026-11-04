@@ -114,6 +114,17 @@ host or the firmware.
      one decision differs, on the extent threshold (ruler-15, 19.25 vs 20 mm: integer
      points are rounded twice). `path` now rounds its config to the gc_config formats,
      so both decide on the same thresholds. State 1464 B of 2048.
+   - [x] Board self-test (`recognize`, `data/vectors/README.md`): 2400 samples of
+     air-lines (19 events, 4 strokes) replayed through `gc_feed` at boot. 2026-11-04,
+     16 MHz HSI: digest matches the host (events, strokes, points and every `gc_live`
+     point bit for bit); stack peak 1088 B (`_Min_Stack_Size` raised from 1 KB to 1.5 KB); flash
+     47.9 KB with the 38.5 KB vector. `gc_feed` does not fit the 9600 us period:
+     mean 1420 us, worst 22.9 ms at a stroke end (sample 1129), 11.9 ms at MOVING
+     (the ring replay), 17 calls of 2400 over the period.
+     64 MHz (PLL from HSI16, 2 flash wait states, prefetch; APB / 4 keeps PCLK at
+     16 MHz for I2C and UART): same digest; mean 392 us, worst 6.6 ms (stroke end),
+     3.4 ms (replay), none over the period. 3.5x, not 4x (wait states). `stream` at
+     64 MHz: `check --seconds 20` clean (0 missed, 0 errors).
    - Spec question: "append the snapshot point" also when a point already sits at
      t = T (the snapshot sample was stored), giving two equal points. Harmless, but
      decide before 3c.2 whether v1 means it.

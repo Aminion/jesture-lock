@@ -6,6 +6,7 @@ mod check;
 mod events;
 mod path;
 mod stats;
+mod vector;
 
 use std::fs::{self, File};
 use std::io::{BufWriter, ErrorKind, Write};
@@ -72,6 +73,18 @@ enum Command {
     Events {
         #[command(flatten)]
         reference: ReferenceArgs,
+    },
+    /// Board test vector: the first samples of a session, its config and the digest of
+    /// what the host core gives on them (`vector.rs`). The `recognize` firmware embeds it.
+    Vector {
+        #[command(flatten)]
+        reference: ReferenceArgs,
+        /// Samples from the session start (the core needs the first hold to warm up).
+        #[arg(long)]
+        samples: usize,
+        /// Output file.
+        #[arg(long)]
+        out: PathBuf,
     },
     Record {
         #[command(flatten)]
@@ -439,6 +452,25 @@ fn main() -> anyhow::Result<()> {
             let (rec, cfg, about) = reference_config(&reference)?;
             println!("{about}");
             print!("{}", events::report(&rec, &cfg.gc())?);
+            Ok(())
+        }
+        Command::Vector {
+            reference,
+            samples,
+            out,
+        } => {
+            let (rec, cfg, about) = reference_config(&reference)?;
+            print!("{about}");
+            let bytes = vector::build(&rec, &cfg.gc(), samples)?;
+            fs::write(&out, &bytes).with_context(|| format!("writing {}", out.display()))?;
+            let (expect, _) = vector::check(&bytes)?;
+            println!(
+                "wrote {} ({} B): {samples} samples, {} events, digest {:08x}",
+                out.display(),
+                bytes.len(),
+                expect.events,
+                expect.digest
+            );
             Ok(())
         }
         Command::Record {

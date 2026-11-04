@@ -52,9 +52,9 @@ A message with a length other than the one given for its type is dropped and cou
 - Source: TIM2 on the MCU, 1 MHz (1 us per tick), free-running u32. Never the PC receive time.
 - Wraps every 2^32 us (about 71.6 min). The receiver unwraps to 64 bits, assuming that
   consecutive timestamps are less than half a wrap apart.
-- The MCU runs on HSI16, the internal RC oscillator (±1 % over 0..85 °C): MCU time drifts
-  against the PC clock (measured about 0.15 % against the IMU clock). The board's 32.768 kHz
-  LSE crystal is not used. Durations within a session are in MCU time.
+- The MCU clock comes from HSI16, the internal RC oscillator (±1 % over 0..85 °C), through
+  the PLL (64 MHz): MCU time drifts against the PC clock (measured about 0.15 % against the
+  IMU clock). The board's 32.768 kHz LSE crystal is not used. Durations within a session are in MCU time.
 
 ## Messages: MCU -> PC
 
