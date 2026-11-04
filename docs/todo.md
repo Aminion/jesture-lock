@@ -176,21 +176,44 @@ host or the firmware.
 
 Live stream -> `core/` through FFI -> drawing.
 
-UI (`viewer`, egui):
-1. [ ] Live input: open the serial port, decode with the `protocol` crate.
-2. [ ] State indicator: still (calibrating / ready) or moving.
-3. [ ] Stroke capture from moving to the next still; the last stroke stays until the next.
-   While moving, draw the live path (`gc_live`, uncorrected); at `STROKE` replace it with
-   the corrected points, so the jump shows the drift.
-4. [ ] 3D view on the 2D egui `Painter`, our own projection (no 3D library):
-   - orbit with mouse drag, zoom with scroll, front/top/side presets;
+Layout: a top bar (input source, connection, counters), a side panel (state, last event,
+stroke numbers, buttons, event log), the 3D view as the main area, a collapsible raw plot
+below it. Built in this order, each step usable on its own; replay makes everything except
+the serial port testable without the board.
+
+1. [ ] Shared host crate (`session`): move out of `gesture-cli` what the viewer needs too,
+   so there is one copy: recording load (`stats::Recording`), the serial port `open`,
+   frame -> sample decoding, `reference_config` (calibration from `tumble`, bias from
+   `rest-table`, hold thresholds -> `GcConfig`). A move only: `cargo test` and the vectors
+   unchanged.
+2. [ ] Input behind one interface, a worker thread that feeds `Core` and sends samples,
+   events, live points and strokes to the UI over a channel:
+   - replay of a `.bin` session (real time or faster, pause);
+   - live serial: port list with refresh, connect / disconnect, decode with the `protocol`
+     crate; rate, frame and error counters in the top bar.
+   Configured by the same `--calib`, `--bias`, `--hold` arguments as `strokes` (file
+   pickers later). Check: replay of ruler-30 gives the strokes `gesture-cli strokes` lists.
+3. [ ] State indicator: WARMUP / READY / MOVING, and the last event with its reject reason
+   (`REJ SHORT`), so a missing stroke shows why. Event log in the side panel.
+4. [ ] Stroke capture, first as a plain 2D top view: while moving, the live path (`gc_live`,
+   uncorrected); at `STROKE` replace it with the corrected points, so the jump shows the
+   drift; a rejected move greys out. The last stroke stays until the next. Beside it the
+   `strokes` numbers (|d|, duration, peak speed, v_end, extent).
+   - Clear: wipe the view.
+   - Keep all: overlay several strokes (does the same gesture repeat?).
+5. [ ] Record session: write the incoming stream to `data/sessions/*.bin` in the `record`
+   format, so anything seen live goes through the CLI tools. Saving one stroke as a
+   template waits for `docs/template_format.md`.
+6. [ ] 3D view on the 2D egui `Painter`, our own projection (no 3D library):
+   - orbit with mouse drag, zoom with scroll, front/top/side presets, fit;
    - axes: up from gravity, forward = board heading at the stroke start (no magnetometer);
    - floor grid, axis marker, start/end markers;
    - far segments drawn first (sort by depth, no depth buffer).
-5. [ ] Path drawing: a dot per sample, colored by speed (perceptual gradient, e.g. blue ->
+7. [ ] Path drawing: a dot per point, colored by speed (perceptual gradient, e.g. blue ->
    yellow, fixed range ~0..1.5 m/s with a legend); optional thin connecting line.
-6. [ ] Raw signal plot (gyro and accel, 6 axes) for debugging, with clipping marked
-   (near the range ends: the `peaks` run at +-2 g / 250 dps reached ~1.8 g and 182 dps).
+8. [ ] Raw signal plot (`egui_plot`, collapsible, off by default): gyro and accel, 6 axes,
+   last few seconds, with clipping marked (near the range ends: the `peaks` run at
+   +-2 g / 250 dps reached ~1.8 g and 182 dps).
 
 ## Step 4: fusion algorithms compared
 
