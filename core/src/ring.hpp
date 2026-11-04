@@ -6,6 +6,7 @@
 #include "config.hpp"
 
 #include <array>
+#include <cstddef>
 #include <cstdint>
 
 namespace gcore {

@@ -209,9 +209,10 @@ sensitivity.)
    - `WARMUP`: streak >= hold_n -> `STILL`, event `READY`.
    - `STILL`: window not quiet -> start the stroke (below), `MOVING`, event `MOVING`.
    - `MOVING`: integrate this sample (below). If now `t - t_s0 > max_stroke_us`:
-     `REJECTED(LONG)`, `WARMUP`, and nothing else on this sample. If the streak became 1: snapshot (v, p,
-     t, clipped flag). If it became 0: drop the snapshot. If it reached hold_n: end the
-     stroke at the snapshot (below), `STILL`, event `STROKE` or `REJECTED`.
+     `REJECTED(LONG)`, `WARMUP`, and nothing else on this sample. If the streak became
+     1: snapshot (v, p, t, clipped flag). If it became 0: drop the snapshot. If it
+     reached hold_n: end the stroke at the snapshot (below), `STILL`, event `STROKE` or
+     `REJECTED`.
 
 ### Stroke start
 At sample k (first non-quiet window), with ring indices relative to k:
