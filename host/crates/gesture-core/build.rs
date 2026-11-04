@@ -1,5 +1,6 @@
-//! Builds `core/` with its own CMakeLists.txt so the host and MCU share one
-//! source list and one set of compile options.
+//! Builds `core/` (the core.h contract plus its implementation) with its own
+//! CMakeLists.txt so the host and MCU share one source list and one set of compile
+//! options.
 
 use std::path::PathBuf;
 

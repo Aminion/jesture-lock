@@ -1,4 +1,4 @@
-//! Safe wrapper over the C ABI in `core/include/gesture/core.h`.
+//! Safe wrapper over the C ABI in `core/contract/include/gesture/core.h`.
 //! The same C++ sources are compiled for the MCU, so results must match bit for bit.
 //!
 //! A thin wrapper so far; the full one (owned types, docs) is 3d.1.

@@ -2,7 +2,7 @@
 
 Recorded or synthetic IMU samples, each with its `gc_config` and the digest of what
 `core.h` gives on them (`docs/core.md`). An implementation conforms when it gives the
-stored digest on every file. Checked on the host by `ctest` (`core/tests/core_vectors.cpp`,
+stored digest on every file. Checked on the host by `ctest` (`core/contract/tests/core_vectors.cpp`,
 through `core.h` only) and by `cargo test` (which also checks that every file regenerates to
 the same bytes); on the MCU through the board vector.
 
@@ -69,7 +69,7 @@ the digest, so a vector cannot silently stop testing what it was made for.
 | `drift-max` | 80 m/s with max_v_end_mm_s 65535: DRIFT before saturation |
 | `wrap-replay`, `wrap-stroke` | the MCU clock wrapping inside the replay, then inside a stroke |
 
-Not covered here: `gc_init` errors (`core/tests/core_test.cpp`).
+Not covered here: `gc_init` errors (`core/cpp/tests/core_test.cpp`, the C++ implementation).
 
 ## On the board
 

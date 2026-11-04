@@ -90,7 +90,7 @@ host or the firmware.
 3. [x] RAM budget: state 2048 B fixed in the header (ring 48 x 14 B, 64 points x 8 B as
    int16 mm, halving the point rate when full).
 4. [x] `core.h`: ABI v1 declarations, valid C11 and C++ (compiled as C11 by
-   `core/tests/core_c_check.c`). Sizes asserted in the header; alignment and every field
+   `core/contract/tests/core_c_check.c`). Sizes asserted in the header; alignment and every field
    offset asserted in `core_c_check.c` and in `gesture-core/src/ffi.rs`, so a layout
    drift on either side fails the build.
 

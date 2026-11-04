@@ -1,4 +1,4 @@
-//! Raw `extern "C"` declarations mirroring `core/include/gesture/core.h` (ABI v1,
+//! Raw `extern "C"` declarations mirroring `core/contract/include/gesture/core.h` (ABI v1,
 //! contract in `docs/core.md`). Written by hand: every struct below has its size,
 //! alignment and field offsets checked at compile time against the numbers in
 //! `core.h`/`docs/core.md`, so a drift between the two fails the build.

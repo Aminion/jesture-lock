@@ -15,7 +15,7 @@ layout, a constant or a formula is a new version; config values are not part of 
   here, pointers. No callbacks, allocation, global state, I/O or clock. Enumerations are
   integer `#define`s, never C `enum`.
 - `core.h` is valid C11 (and later) and C++; the host build compiles it as C11
-  (`core/tests/core_c_check.c`). Every struct has a typedef of the same name.
+  (`core/contract/tests/core_c_check.c`). Every struct has a typedef of the same name.
 - Layouts are checked at compile time on both sides: sizes in `core.h`, alignment and
   every field offset in `core_c_check.c` (C) and `host/crates/gesture-core/src/ffi.rs`
   (Rust).

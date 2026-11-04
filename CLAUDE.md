@@ -28,14 +28,18 @@ Flash one or the other. Results of both paths on the same recording must match b
   `WHO_AM_I`; never hardcode 0x69 as the only valid value.
 
 ## Structure
-- `core/`: pure recognition core (C++) plus a C ABI. Builds for host and MCU. All motion
-  math goes here (still detection, sensor fusion, stroke path, recognition), never in the
-  viewer or the firmware apps.
+- `core/`: pure recognition core: a C ABI plus one implementation of it. Builds for host
+  and MCU. All motion math goes here (still detection, sensor fusion, stroke path,
+  recognition), never in the viewer or the firmware apps.
   `gesture/core.h` is a contract between languages, like the wire format: specified in
-  `docs/core.md` (ABI plus bit-exact algorithm spec), checked by conformance vectors run
-  through `core.h` only. The C++ code is the first implementation; another language may
-  replace it, so the Rust host and the firmware see `core.h` and nothing else, and the
-  caller owns the state (size fixed in the header).
+  `docs/core.md` (ABI plus bit-exact algorithm spec), checked by conformance vectors
+  (`data/vectors/`) run through `core.h` only. The C++ code is the first implementation;
+  another language may replace it, so the Rust host and the firmware see `core.h` and
+  nothing else, and the caller owns the state (size fixed in the header).
+  - `core/contract/`: implementation-independent: `include/gesture/core.h` (CMake
+    `gesture_core_abi`), its C11 check and the vector runner (`tests/`).
+  - `core/cpp/`: the C++ implementation (`gesture_core`, internal headers in `src/`, unit
+    tests in `tests/`). Callers link `gesture_core`, whichever implementation provides it.
 - `proto/`: protocol framing (COBS, CRC16), no hardware dependencies. Builds for host and MCU;
   `host/crates/protocol` mirrors it.
 - `firmware/board/`: clocks, pins, I2C/UART/LSM6DS3 drivers. Register-free logic (ring buffer,
