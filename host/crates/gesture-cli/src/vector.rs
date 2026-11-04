@@ -24,11 +24,9 @@
 
 use std::path::Path;
 
-use anyhow::{Context, bail, ensure};
-use gesture_core::Core;
-use gesture_core::ffi::{
-    GC_EV_NONE, GC_EV_STROKE, GcConfig, GcEvent, GcPoint, GcSample, GcStrokeInfo,
-};
+use anyhow::{Context, ensure};
+use gesture_core::ffi::GcEvent;
+use gesture_core::{Core, GcConfig, GcPoint, GcSample, GcStrokeInfo, Kind, Stroke};
 
 use crate::stats::Recording;
 
@@ -176,20 +174,19 @@ fn hash_info(h: &mut Fnv, i: &GcStrokeInfo) {
 
 /// Runs `samples` through the core from `gc_init` and digests what it gives.
 fn digest(cfg: &GcConfig, samples: &[GcSample]) -> anyhow::Result<Expect> {
-    let Ok(mut core) = Core::new(cfg) else {
-        bail!("gc_init rejected the config: {cfg:?}");
-    };
+    let mut core = Core::new(cfg).with_context(|| format!("config {cfg:?}"))?;
     let mut h = Fnv::new();
     let mut events = 0;
     for (k, s) in samples.iter().enumerate() {
         let ev = core.feed(s);
-        if ev.kind != GC_EV_NONE {
+        if !ev.is_none() {
             events += 1;
             h.bytes(&u32::try_from(k)?.to_le_bytes());
-            hash_event(&mut h, &ev);
+            // The wrapper checked the event against the contract: these are its bytes.
+            hash_event(&mut h, &GcEvent::from(ev));
         }
-        if ev.kind == GC_EV_STROKE {
-            let (info, points) = core.stroke().unwrap_or_default();
+        if ev.kind == Kind::Stroke {
+            let Stroke { info, points } = core.stroke().unwrap_or_default();
             ensure!(
                 info.points <= POINTS_CAP,
                 "stroke at sample {k} has {} points, the board buffer {POINTS_CAP}",

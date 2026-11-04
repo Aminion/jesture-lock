@@ -159,8 +159,11 @@ host or the firmware.
 
 ### 3d: host tools
 
-1. [ ] `gesture-core` FFI: safe wrapper over `core.h`. The raw mirror (`ffi.rs`, layout
-   checked) is done; the wrapper in `lib.rs` waits for 3c.1.
+1. [x] `gesture-core` FFI: safe wrapper over `core.h`. `ffi.rs` is the raw mirror (layout
+   checked); `lib.rs` has `Core` (boxed state), `Error` for `gc_init`, typed `Event`
+   (`Kind`, `State`, `Reject`) and an owned `Stroke`. Every output is checked against the
+   "else 0" rules of `docs/core.md` (a violation panics), so `GcEvent::from(event)` gives
+   the implementation's exact bytes and the cargo-side digests stay honest.
 2. [ ] `gesture-cli strokes <file>`: per stroke duration, net displacement, peak speed,
    residual velocity before the correction. Ruler test: 30 cm slide -> ~0.30 m.
 

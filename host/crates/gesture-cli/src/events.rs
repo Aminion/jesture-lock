@@ -4,20 +4,14 @@
 
 use std::fmt::Write as _;
 
-use anyhow::bail;
-use gesture_core::Core;
-use gesture_core::ffi::{
-    GC_EV_MOVING, GC_EV_NONE, GC_EV_READY, GC_EV_REJECTED, GC_EV_STROKE, GC_REJ_CLIPPED,
-    GC_REJ_DRIFT, GC_REJ_LONG, GC_REJ_SHORT, GC_REJ_TIME_GAP, GcConfig, GcEvent, GcSample,
-};
+use anyhow::{Context, bail};
+use gesture_core::{Core, Event, GcConfig, GcSample};
 
 use crate::stats::Recording;
 
-/// The events of a recording: (sample index, event), `GC_EV_NONE` left out.
-pub fn run(rec: &Recording, cfg: &GcConfig) -> anyhow::Result<Vec<(usize, GcEvent)>> {
-    let Ok(mut core) = Core::new(cfg) else {
-        bail!("gc_init rejected the config: {cfg:?}");
-    };
+/// The events of a recording: (sample index, event), `Kind::None` left out.
+pub fn run(rec: &Recording, cfg: &GcConfig) -> anyhow::Result<Vec<(usize, Event)>> {
+    let mut core = Core::new(cfg).with_context(|| format!("config {cfg:?}"))?;
     Ok(rec
         .samples
         .iter()
@@ -28,27 +22,9 @@ pub fn run(rec: &Recording, cfg: &GcConfig) -> anyhow::Result<Vec<(usize, GcEven
                 gyro: s.gyro,
                 accel: s.accel,
             });
-            (ev.kind != GC_EV_NONE).then_some((k, ev))
+            (!ev.is_none()).then_some((k, ev))
         })
         .collect())
-}
-
-fn name(ev: &GcEvent) -> String {
-    let reason = match ev.reason {
-        GC_REJ_SHORT => "SHORT",
-        GC_REJ_LONG => "LONG",
-        GC_REJ_CLIPPED => "CLIPPED",
-        GC_REJ_TIME_GAP => "TIME_GAP",
-        GC_REJ_DRIFT => "DRIFT",
-        _ => "?",
-    };
-    match ev.kind {
-        GC_EV_READY => "READY".to_owned(),
-        GC_EV_MOVING => "MOVING".to_owned(),
-        GC_EV_STROKE => "STROKE".to_owned(),
-        GC_EV_REJECTED => format!("REJ {reason}"),
-        k => format!("kind {k}"),
-    }
 }
 
 pub fn report(rec: &Recording, cfg: &GcConfig) -> anyhow::Result<String> {
@@ -59,7 +35,7 @@ pub fn report(rec: &Recording, cfg: &GcConfig) -> anyhow::Result<String> {
     writeln!(out, "  t, s  sample  event")?;
     for (k, ev) in run(rec, cfg)? {
         let at = (rec.samples[k].0 - t0) as f64 / 1e6;
-        writeln!(out, "{at:>6.2}  {k:>6}  {}", name(&ev))?;
+        writeln!(out, "{at:>6.2}  {k:>6}  {}", ev.kind)?;
     }
     Ok(out)
 }
@@ -68,11 +44,11 @@ pub fn report(rec: &Recording, cfg: &GcConfig) -> anyhow::Result<String> {
 mod tests {
     use std::path::Path;
 
-    use gesture_core::ffi::GcPoint;
+    use gesture_core::{GcPoint, Kind, Reject};
 
     use super::*;
     use crate::calib::HAND;
-    use crate::path::{self, Event, MIN_EXTENT_MM, MIN_STROKE_US, Reject};
+    use crate::path::{self, MIN_EXTENT_MM, MIN_STROKE_US};
     use crate::stats;
 
     fn load(name: &str) -> Recording {
@@ -82,8 +58,19 @@ mod tests {
         stats::load(&std::fs::read(file).expect("session file")).expect("session")
     }
 
-    /// (sample index, `GC_EV_*`).
-    type Kinds = Vec<(usize, u8)>;
+    /// (sample index, kind).
+    type Kinds = Vec<(usize, Kind)>;
+
+    /// The float reference's reject reason as the core's.
+    fn reason(r: &path::Reject) -> Reject {
+        match r {
+            path::Reject::Short => Reject::Short,
+            path::Reject::Long => Reject::Long,
+            path::Reject::Clipped => Reject::Clipped,
+            path::Reject::TimeGap => Reject::TimeGap,
+            path::Reject::Drift => Reject::Drift,
+        }
+    }
 
     /// Events of the float reference.
     fn reference(rec: &Recording, cfg: &path::Config) -> Kinds {
@@ -94,10 +81,10 @@ mod tests {
             .filter_map(|(k, (t, s))| {
                 core.feed(*t, s).map(|e| {
                     let kind = match e {
-                        Event::Ready => GC_EV_READY,
-                        Event::Moving => GC_EV_MOVING,
-                        Event::Stroke(_) => GC_EV_STROKE,
-                        Event::Rejected(..) => GC_EV_REJECTED,
+                        path::Event::Ready => Kind::Ready,
+                        path::Event::Moving => Kind::Moving,
+                        path::Event::Stroke(_) => Kind::Stroke,
+                        path::Event::Rejected(r, _) => Kind::Rejected(reason(&r)),
                     };
                     (k, kind)
                 })
@@ -123,7 +110,7 @@ mod tests {
     fn rest_table_is_one_hold() {
         let (ints, floats) = both("20261030-183544_rest-table.bin");
         // READY once the first hold_n windows are quiet, then nothing for 60 s.
-        assert_eq!(ints, [(32 + 20 - 2, GC_EV_READY)]);
+        assert_eq!(ints, [(32 + 20 - 2, Kind::Ready)]);
         assert_eq!(ints, floats);
     }
 
@@ -180,10 +167,10 @@ mod tests {
         assert!(far > 20.0, "the stroke moved: {far:.1} mm");
     }
 
-    /// One event, as both cores report it: (sample index, kind, reason, duration_us,
-    /// v_end mm/s, extent mm). The last three only at a stroke end; the integer core gives
+    /// One event, as both cores report it: (sample index, kind, duration_us, v_end mm/s,
+    /// extent mm). The last three only at a stroke end; the integer core gives
     /// extent only for `STROKE` (through `gc_stroke`), the float one at every end.
-    type Full = (usize, u8, u8, u32, f64, Option<f64>);
+    type Full = (usize, Kind, u32, f64, Option<f64>);
 
     fn full_events(rec: &Recording, cfg: &path::Config) -> (Vec<Full>, Vec<Full>) {
         let gc = cfg.gc();
@@ -196,42 +183,28 @@ mod tests {
                 gyro: s.gyro,
                 accel: s.accel,
             });
-            if ev.kind != GC_EV_NONE {
-                let extent = (ev.kind == GC_EV_STROKE).then(|| {
-                    let (info, points) = ints.stroke().expect("gc_stroke after STROKE");
-                    assert_eq!(usize::from(info.points), points.len());
-                    assert_eq!(info.points, ev.points);
-                    f64::from(info.extent_mm)
+            if !ev.is_none() {
+                let extent = (ev.kind == Kind::Stroke).then(|| {
+                    let stroke = ints.stroke().expect("gc_stroke after STROKE");
+                    assert_eq!(usize::from(stroke.info.points), stroke.points.len());
+                    assert_eq!(stroke.info.points, ev.points);
+                    f64::from(stroke.info.extent_mm)
                 });
-                a.push((
-                    k,
-                    ev.kind,
-                    ev.reason,
-                    ev.duration_us,
-                    f64::from(ev.v_end_mm_s),
-                    extent,
-                ));
+                a.push((k, ev.kind, ev.duration_us, f64::from(ev.v_end_mm_s), extent));
             }
             if let Some(e) = floats.feed(*t, s) {
-                let reason = |r: &Reject| match r {
-                    Reject::Short => GC_REJ_SHORT,
-                    Reject::Long => GC_REJ_LONG,
-                    Reject::Clipped => GC_REJ_CLIPPED,
-                    Reject::TimeGap => GC_REJ_TIME_GAP,
-                    Reject::Drift => GC_REJ_DRIFT,
-                };
                 let end = |d: &path::Done| (d.duration_us as u32, d.v_end_mm_s);
                 b.push(match &e {
-                    Event::Ready => (k, GC_EV_READY, 0, 0, 0.0, None),
-                    Event::Moving => (k, GC_EV_MOVING, 0, 0, 0.0, None),
-                    Event::Stroke(d) => {
+                    path::Event::Ready => (k, Kind::Ready, 0, 0.0, None),
+                    path::Event::Moving => (k, Kind::Moving, 0, 0.0, None),
+                    path::Event::Stroke(d) => {
                         let (dur, v) = end(d);
-                        (k, GC_EV_STROKE, 0, dur, v, Some(d.extent_mm))
+                        (k, Kind::Stroke, dur, v, Some(d.extent_mm))
                     }
-                    Event::Rejected(r, d) => {
+                    path::Event::Rejected(r, d) => {
                         let (dur, v) = d.as_ref().map_or((0, 0.0), end);
                         let extent = d.as_ref().map(|d| d.extent_mm);
-                        (k, GC_EV_REJECTED, reason(r), dur, v, extent)
+                        (k, Kind::Rejected(reason(r)), dur, v, extent)
                     }
                 });
             }
@@ -242,31 +215,31 @@ mod tests {
     /// Whether an integer event matches the float one, and if so whether only because the
     /// float value sat within rounding of a threshold (an edge).
     fn matches(i: &Full, f: &Full) -> Option<bool> {
-        if i.0 != f.0 || i.3 != f.3 {
+        if i.0 != f.0 || i.2 != f.2 {
             return None;
         }
         // The quaternion step is first order (docs/core.md): over big turns the tilt
         // drifts a little from the exact one, and gravity leaks into v by ~0.5 %.
-        if (i.4 - f.4).abs() > 0.5 + 0.005 * f.4 {
+        if (i.3 - f.3).abs() > 0.5 + 0.005 * f.3 {
             return None;
         }
-        if let (Some(a), Some(b)) = (i.5, f.5) {
+        if let (Some(a), Some(b)) = (i.4, f.4) {
             // Rounding to mm, plus a peak the decimated points can miss.
             if (a - b).abs() > 2.0 {
                 return None;
             }
         }
-        if (i.1, i.2) == (f.1, f.2) {
+        if i.1 == f.1 {
             return Some(false);
         }
         // A stroke on one side, SHORT (extent) on the other: the extent is on the
         // threshold to within the rounding. Integer points are rounded twice (the stored
         // mm, then the correction in mm), so up to 1 mm off the exact value.
-        let short = |e: &Full| e.1 == GC_EV_REJECTED && e.2 == GC_REJ_SHORT;
-        let near_min = f.5.is_some_and(|x| (x - MIN_EXTENT_MM).abs() <= 1.0);
-        let edge = ((i.1 == GC_EV_STROKE && short(f)) || (short(i) && f.1 == GC_EV_STROKE))
+        let short = |e: &Full| e.1 == Kind::Rejected(Reject::Short);
+        let near_min = f.4.is_some_and(|x| (x - MIN_EXTENT_MM).abs() <= 1.0);
+        let edge = ((i.1 == Kind::Stroke && short(f)) || (short(i) && f.1 == Kind::Stroke))
             && near_min
-            && u64::from(f.3) >= MIN_STROKE_US;
+            && u64::from(f.2) >= MIN_STROKE_US;
         edge.then_some(true)
     }
 
@@ -297,7 +270,7 @@ mod tests {
                     Some(true) => edges.push(format!("{name}: int {i:?} vs float {f:?}")),
                     Some(false) => {}
                 }
-                ends += usize::from(i.3 > 0);
+                ends += usize::from(i.2 > 0);
             }
         }
         assert!(bad.is_empty(), "{}", bad.join("\n"));

@@ -10,12 +10,8 @@
 use std::path::Path;
 
 use anyhow::Context;
-use gesture_core::Core;
-use gesture_core::ffi::{
-    GC_ABI_VERSION, GC_EV_MOVING, GC_EV_NONE, GC_EV_READY, GC_EV_REJECTED, GC_EV_STROKE,
-    GC_REJ_CLIPPED, GC_REJ_DRIFT, GC_REJ_LONG, GC_REJ_SHORT, GC_REJ_TIME_GAP, GcConfig, GcEvent,
-    GcPoint, GcSample, GcStrokeInfo,
-};
+use gesture_core::ffi::GC_ABI_VERSION;
+use gesture_core::{Core, Event, GcConfig, GcSample, Kind, Reject, Stroke};
 use protocol::{Firmware, Hello, ImuStatus};
 
 use crate::vector;
@@ -326,22 +322,22 @@ impl Gen {
 #[derive(Debug)]
 pub struct Out {
     pub k: usize,
-    pub ev: GcEvent,
-    pub stroke: Option<(GcStrokeInfo, Vec<GcPoint>)>,
+    pub ev: Event,
+    pub stroke: Option<Stroke>,
 }
 
 /// Runs a vector's samples through the core; the non-NONE events.
 pub fn replay(cfg: &GcConfig, samples: &[GcSample]) -> anyhow::Result<Vec<Out>> {
-    let mut core = Core::new(cfg).map_err(|e| anyhow::anyhow!("gc_init: status {e}"))?;
+    let mut core = Core::new(cfg)?;
     Ok(samples
         .iter()
         .enumerate()
         .filter_map(|(k, s)| {
             let ev = core.feed(s);
-            (ev.kind != GC_EV_NONE).then(|| Out {
+            (!ev.is_none()).then(|| Out {
                 k,
                 ev,
-                stroke: (ev.kind == GC_EV_STROKE).then(|| core.stroke()).flatten(),
+                stroke: (ev.kind == Kind::Stroke).then(|| core.stroke()).flatten(),
             })
         })
         .collect())
@@ -351,8 +347,8 @@ pub fn replay(cfg: &GcConfig, samples: &[GcSample]) -> anyhow::Result<Vec<Out>> 
 #[derive(Debug)]
 pub struct Case {
     pub name: &'static str,
-    /// The events it must give, (kind, reason), in order.
-    pub expect: &'static [(u8, u8)],
+    /// The events it must give, in order.
+    pub expect: &'static [Kind],
     build: fn() -> anyhow::Result<(GcConfig, Vec<GcSample>)>,
 }
 
@@ -362,11 +358,11 @@ impl Case {
     }
 }
 
-const READY: (u8, u8) = (GC_EV_READY, 0);
-const MOVING: (u8, u8) = (GC_EV_MOVING, 0);
-const STROKE: (u8, u8) = (GC_EV_STROKE, 0);
-const fn rejected(reason: u8) -> (u8, u8) {
-    (GC_EV_REJECTED, reason)
+const READY: Kind = Kind::Ready;
+const MOVING: Kind = Kind::Moving;
+const STROKE: Kind = Kind::Stroke;
+const fn rejected(reason: Reject) -> Kind {
+    Kind::Rejected(reason)
 }
 
 /// The line used by the scale cases: 120 mm across while turning 40 degrees.
@@ -401,7 +397,7 @@ pub const CASES: &[Case] = &[
     // zero, so it is too small for a stroke.
     Case {
         name: "turn-in-place",
-        expect: &[READY, MOVING, rejected(GC_REJ_SHORT)],
+        expect: &[READY, MOVING, rejected(Reject::Short)],
         build: || {
             let s = Sensor::HAND;
             Ok(Gen::new(s)
@@ -510,7 +506,7 @@ pub const CASES: &[Case] = &[
             READY,
             READY,
             MOVING,
-            rejected(GC_REJ_TIME_GAP),
+            rejected(Reject::TimeGap),
             READY,
             MOVING,
             STROKE,
@@ -535,7 +531,7 @@ pub const CASES: &[Case] = &[
     // A move longer than max_stroke_us (1.5 s here): rejected at once, then WARMUP.
     Case {
         name: "long",
-        expect: &[READY, MOVING, rejected(GC_REJ_LONG), READY, MOVING, STROKE],
+        expect: &[READY, MOVING, rejected(Reject::Long), READY, MOVING, STROKE],
         build: || {
             let s = Sensor::HAND;
             let cfg = GcConfig {
@@ -554,7 +550,7 @@ pub const CASES: &[Case] = &[
     // A clipped reading on the first sample of the move, inside the replay.
     Case {
         name: "clipped",
-        expect: &[READY, MOVING, rejected(GC_REJ_CLIPPED), MOVING, STROKE],
+        expect: &[READY, MOVING, rejected(Reject::Clipped), MOVING, STROKE],
         build: || {
             let s = Sensor::HAND;
             Ok(Gen::new(s)
@@ -573,9 +569,9 @@ pub const CASES: &[Case] = &[
         expect: &[
             READY,
             MOVING,
-            rejected(GC_REJ_SHORT),
+            rejected(Reject::Short),
             MOVING,
-            rejected(GC_REJ_SHORT),
+            rejected(Reject::Short),
         ],
         build: || {
             let s = Sensor::HAND;
@@ -596,7 +592,7 @@ pub const CASES: &[Case] = &[
     // The board ends at 0.5 m/s: DRIFT (max 0.3 m/s).
     Case {
         name: "drift",
-        expect: &[READY, MOVING, rejected(GC_REJ_DRIFT)],
+        expect: &[READY, MOVING, rejected(Reject::Drift)],
         build: || {
             let s = Sensor::HAND;
             Ok(Gen::new(s)
@@ -610,7 +606,7 @@ pub const CASES: &[Case] = &[
     // before saturation, and it bounds the correction.
     Case {
         name: "drift-max",
-        expect: &[READY, MOVING, rejected(GC_REJ_DRIFT)],
+        expect: &[READY, MOVING, rejected(Reject::Drift)],
         build: || {
             let s = Sensor::with_scales(0x44, 0x44);
             let cfg = GcConfig {
@@ -662,8 +658,8 @@ const FULL_AT_END: std::ops::Range<usize> = 1008..1014;
 /// less `GC_GUARD_N` + 1) to the sample whose window was the first quiet one (the STROKE
 /// sample less hold_n - 1).
 fn snapshot_c(outs: &[Out], hold_n: u16) -> Option<usize> {
-    let k = outs.iter().find(|o| o.ev.kind == GC_EV_MOVING)?.k;
-    let e = outs.iter().find(|o| o.ev.kind == GC_EV_STROKE)?.k;
+    let k = outs.iter().find(|o| o.ev.kind == Kind::Moving)?.k;
+    let e = outs.iter().find(|o| o.ev.kind == Kind::Stroke)?.k;
     Some((e + 1 - usize::from(hold_n)) - (k - GUARD_N - 1))
 }
 
@@ -673,14 +669,12 @@ pub fn write_all(dir: &Path) -> anyhow::Result<()> {
     for case in CASES {
         let (cfg, samples) = case.build().with_context(|| case.name)?;
         let outs = replay(&cfg, &samples)?;
-        let kinds: Vec<(u8, u8)> = outs.iter().map(|o| (o.ev.kind, o.ev.reason)).collect();
+        let kinds: Vec<Kind> = outs.iter().map(|o| o.ev.kind).collect();
         anyhow::ensure!(
             kinds == case.expect,
             "{}: events {:?}, meant {:?}",
             case.name,
-            outs.iter()
-                .map(|o| (o.k, o.ev.kind, o.ev.reason))
-                .collect::<Vec<_>>(),
+            outs.iter().map(|o| (o.k, o.ev.kind)).collect::<Vec<_>>(),
             case.expect
         );
         let bytes = vector::encode(&cfg, &samples)?;
@@ -689,7 +683,7 @@ pub fn write_all(dir: &Path) -> anyhow::Result<()> {
         let (expect, _) = vector::check(&bytes)?;
         let ends: Vec<[i16; 3]> = outs
             .iter()
-            .filter_map(|o| o.stroke.as_ref()?.1.last())
+            .filter_map(|o| o.stroke.as_ref()?.points.last())
             .map(|p| [p.x_mm, p.y_mm, p.z_mm])
             .collect();
         println!(
@@ -707,6 +701,8 @@ pub fn write_all(dir: &Path) -> anyhow::Result<()> {
 mod tests {
     use std::path::PathBuf;
 
+    use gesture_core::{GcPoint, GcStrokeInfo};
+
     use super::*;
 
     fn dir() -> PathBuf {
@@ -721,7 +717,10 @@ mod tests {
     }
 
     fn strokes(outs: &[Out]) -> Vec<(GcStrokeInfo, Vec<GcPoint>)> {
-        outs.iter().filter_map(|o| o.stroke.clone()).collect()
+        outs.iter()
+            .filter_map(|o| o.stroke.clone())
+            .map(|s| (s.info, s.points))
+            .collect()
     }
 
     /// The last point of a stroke against the true move (mm, start frame).
@@ -755,7 +754,7 @@ mod tests {
         for c in CASES {
             let (cfg, samples) = c.build().expect(c.name);
             let outs = replay(&cfg, &samples).expect(c.name);
-            let kinds: Vec<(u8, u8)> = outs.iter().map(|o| (o.ev.kind, o.ev.reason)).collect();
+            let kinds: Vec<Kind> = outs.iter().map(|o| o.ev.kind).collect();
             assert_eq!(kinds, c.expect, "{}: events", c.name);
 
             let bytes = vector::encode(&cfg, &samples).expect(c.name);
@@ -850,10 +849,10 @@ mod tests {
     #[test]
     fn short_by_duration_then_by_extent() {
         let (cfg, _, outs) = case("short");
-        let ends: Vec<&GcEvent> = outs
+        let ends: Vec<&Event> = outs
             .iter()
             .map(|o| &o.ev)
-            .filter(|e| e.kind == GC_EV_REJECTED)
+            .filter(|e| matches!(e.kind, Kind::Rejected(_)))
             .collect();
         assert!(ends[0].duration_us < cfg.min_stroke_us, "{:?}", ends[0]);
         assert!(ends[1].duration_us >= cfg.min_stroke_us, "{:?}", ends[1]);
