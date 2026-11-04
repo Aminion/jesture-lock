@@ -89,6 +89,10 @@ host or the firmware.
    - [x] a tumble session at +-4 g (`tumble-4g`).
 3. [x] RAM budget: state 2048 B fixed in the header (ring 48 x 14 B, 64 points x 8 B as
    int16 mm, halving the point rate when full).
+4. [x] `core.h`: ABI v1 declarations, valid C11 and C++ (compiled as C11 by
+   `core/tests/core_c_check.c`). Sizes asserted in the header; alignment and every field
+   offset asserted in `core_c_check.c` and in `gesture-core/src/ffi.rs`, so a layout
+   drift on either side fails the build.
 
 ### 3c: C++ implementation
 
@@ -109,10 +113,13 @@ host or the firmware.
    calibration from `tumble-4g`, bias from `rest-table-4g`.
 3. [ ] Build: the `gesture-core` build.rs and the firmware link "a static lib
    `gesture_core` providing `core.h`"; the implementation is one build option.
+   build.rs already builds `core/` via the `cmake` crate and links `gesture_core`
+   statically; the option is still missing.
 
 ### 3d: host tools
 
-1. [ ] `gesture-core` FFI: safe wrapper over `core.h`.
+1. [ ] `gesture-core` FFI: safe wrapper over `core.h`. The raw mirror (`ffi.rs`, layout
+   checked) is done; the wrapper in `lib.rs` waits for 3c.1.
 2. [ ] `gesture-cli strokes <file>`: per stroke duration, net displacement, peak speed,
    residual velocity before the correction. Ruler test: 30 cm slide -> ~0.30 m.
 
