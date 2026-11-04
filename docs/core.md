@@ -13,6 +13,8 @@ layout, a constant or a formula is a new version; config values are not part of 
 - Only C types cross the ABI: fixed-width integers, structs with exactly the layout given
   here, pointers. No callbacks, allocation, global state, I/O or clock. Enumerations are
   integer `#define`s, never C `enum`.
+- `core.h` is valid C11 (and later) and C++; the host build compiles it as C11
+  (`core/tests/core_c_check.c`). Every struct has a typedef of the same name.
 - The caller owns all memory. Byte order is the platform's.
 - Deterministic: the same calls give the same outputs on any implementation and target.
 - Preconditions (a caller bug, not an error code): valid non-null pointers, `gc_state`
