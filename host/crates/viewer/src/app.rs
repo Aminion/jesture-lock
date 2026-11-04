@@ -1,21 +1,22 @@
-//! The window: a top bar (source, connection, counters) over the stroke list. The state
-//! indicator, the event log and the drawing come next (`docs/todo.md` 3e).
+//! The window: a top bar (source, connection, counters), a side panel (state, last event,
+//! event log) and the stroke list. The drawing comes next (`docs/todo.md` 3e).
 //!
 //! Elm-shaped: the source's `Update`s fold into `View`; drawing reads the `Model` and
 //! returns `Action`s; `Model::act` applies them after the frame. Only the `Form` (what
 //! the source should be) is edited by widgets directly.
 
+use std::collections::VecDeque;
 use std::path::PathBuf;
 
-use egui::{CentralPanel, ComboBox, Panel, RichText, Ui};
-use gesture_core::{Event, GcPoint, Kind, Stroke};
+use egui::{CentralPanel, Color32, ComboBox, Panel, RichText, Ui};
+use gesture_core::{Event, GcPoint, Kind, Reject, State, Stroke};
 use protocol::{Firmware, Hello};
 use session::check::Totals;
 use session::reference::Setup;
 use session::serial::{self, PortArgs};
 use session::strokes::Summary;
 
-use crate::feed::Update;
+use crate::feed::{Limits, Update};
 use crate::source::{Control, Source, Worker};
 
 /// What to open at start (command line).
@@ -80,24 +81,52 @@ pub struct App {
     model: Model,
 }
 
+/// Event log entries kept; older ones are dropped (a live session runs on).
+const LOG_MAX: usize = 1000;
+
+/// How a log line is colored.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Tone {
+    Info,
+    Good,
+    Warn,
+    Error,
+}
+
+#[derive(Debug, Clone)]
+struct Entry {
+    /// Seconds on the session clock (`View::now`).
+    t: f64,
+    tone: Tone,
+    text: String,
+}
+
 /// What the current source has sent.
 #[derive(Debug, Default)]
 struct View {
     hello: Option<Hello>,
     /// The config line, or why the core could not start.
     config: Option<Result<String, String>>,
+    /// The running core's stroke checks.
+    limits: Option<Limits>,
     /// The last (re)start reason.
     started: Option<String>,
     samples: u64,
-    first_t: Option<u64>,
-    last_t: Option<u64>,
+    /// Session clock: seconds of MCU time since the first sample. A restart resets the MCU
+    /// clock (`Feed` unwraps from zero again); this one goes on from where it was.
+    now: f64,
+    /// MCU time (us) of the first sample since the last start, and `now` at it.
+    since_start: Option<(u64, f64)>,
+    /// The core's state after the last sample; `None` until the first one.
+    state: Option<State>,
     /// The last event that was not `NONE`, at its time.
-    last_event: Option<(u64, Event)>,
+    last_event: Option<(f64, Event)>,
     /// `gc_live` while moving.
     live: Option<GcPoint>,
     /// Each stroke at its end: time, numbers, corrected points.
-    strokes: Vec<(u64, Summary, Stroke)>,
+    strokes: Vec<(f64, Summary, Stroke)>,
     rejected: u64,
+    log: VecDeque<Entry>,
     totals: Totals,
     /// The source stopped: `None` at the end of a replay, else the error.
     ended: Option<Option<String>>,
@@ -107,36 +136,116 @@ impl View {
     fn apply(&mut self, u: Update) {
         match u {
             Update::Started { why, hello, config } => {
+                let (tone, text) = match &config {
+                    Ok(_) => (Tone::Info, why.to_string()),
+                    Err(e) => (Tone::Error, format!("{why}; core not started: {e}")),
+                };
+                self.log(tone, text);
                 self.started = Some(why.to_string());
                 self.hello = Some(hello);
-                self.config = Some(config);
+                self.limits = config.as_ref().ok().map(|(_, l)| *l);
+                self.config = Some(config.map(|(about, _)| about));
+                // The core starts over in WARMUP, on a clock from zero.
+                self.state = None;
+                self.live = None;
+                self.since_start = None;
             }
             Update::Sample { t_us, event, live } => {
-                self.live = live;
+                let (t0, now0) = *self.since_start.get_or_insert((t_us, self.now));
+                self.now = now0 + t_us.saturating_sub(t0) as f64 / 1e6;
                 self.samples += 1;
-                self.first_t.get_or_insert(t_us);
-                self.last_t = Some(t_us);
+                self.state = Some(event.state);
+                self.live = live;
                 if !event.is_none() {
-                    self.last_event = Some((t_us, event));
+                    self.last_event = Some((self.now, event));
+                    let tone = match event.kind {
+                        Kind::Stroke => Tone::Good,
+                        Kind::Rejected(_) => Tone::Warn,
+                        _ => Tone::Info,
+                    };
+                    self.log(tone, describe(&event, self.limits));
                 }
                 if matches!(event.kind, Kind::Rejected(_)) {
                     self.rejected += 1;
                 }
             }
             Update::Stroke { stroke, summary } => {
-                self.strokes
-                    .push((self.last_t.unwrap_or_default(), summary, stroke));
+                // Right after its STROKE sample: add the numbers to that log line.
+                if let Some(e) = self.log.back_mut()
+                    && e.tone == Tone::Good
+                {
+                    e.text += &format!(
+                        ", |d| {:.0} mm, extent {} mm",
+                        summary.distance_mm, summary.extent_mm
+                    );
+                }
+                self.strokes.push((self.now, summary, stroke));
             }
             Update::Health(t) => self.totals = t,
-            Update::Ended(e) => self.ended = Some(e),
+            Update::Ended(e) => {
+                match &e {
+                    None => self.log(Tone::Info, "end of the session".to_owned()),
+                    Some(e) => self.log(Tone::Error, e.clone()),
+                }
+                self.ended = Some(e);
+            }
         }
     }
 
-    /// Seconds since the first sample.
-    fn at(&self, t_us: u64) -> f64 {
-        t_us.saturating_sub(self.first_t.unwrap_or(t_us)) as f64 / 1e6
+    fn log(&mut self, tone: Tone, text: String) {
+        if self.log.len() == LOG_MAX {
+            self.log.pop_front();
+        }
+        self.log.push_back(Entry {
+            t: self.now,
+            tone,
+            text,
+        });
     }
 }
+
+/// An event as a log line: the kind, and for a reject why, against the limit it broke
+/// (`docs/core.md`, reject reasons).
+fn describe(ev: &Event, limits: Option<Limits>) -> String {
+    let s = |us: u32| f64::from(us) / 1e6;
+    let dur = s(ev.duration_us);
+    let detail = match (ev.kind, limits) {
+        (Kind::Stroke, _) => format!(
+            "{dur:.2} s, v_end {} mm/s, {} points",
+            ev.v_end_mm_s, ev.points
+        ),
+        (Kind::Rejected(Reject::Short), Some(l)) if ev.duration_us < l.min_stroke_us => {
+            format!("{dur:.2} s < {:.2} s", s(l.min_stroke_us))
+        }
+        // Duration passed, so the extent did not (it is checked last).
+        (Kind::Rejected(Reject::Short), Some(l)) => {
+            format!("extent < {} mm, {dur:.2} s", l.min_extent_mm)
+        }
+        (Kind::Rejected(Reject::Drift), Some(l)) => format!(
+            "v_end {} > {} mm/s, {dur:.2} s",
+            ev.v_end_mm_s, l.max_v_end_mm_s
+        ),
+        (Kind::Rejected(Reject::Long), Some(l)) => {
+            format!("longer than {:.2} s", s(l.max_stroke_us))
+        }
+        (Kind::Rejected(Reject::Clipped), _) => {
+            format!("a clipped reading during the move, {dur:.2} s")
+        }
+        (Kind::Rejected(Reject::TimeGap), _) => "a time gap during the move".to_owned(),
+        (Kind::Rejected(r), None) if r.at_end_hold() => {
+            format!("{dur:.2} s, v_end {} mm/s", ev.v_end_mm_s)
+        }
+        _ => String::new(),
+    };
+    if detail.is_empty() {
+        ev.kind.to_string()
+    } else {
+        format!("{}: {detail}", ev.kind)
+    }
+}
+
+const GREEN: Color32 = Color32::from_rgb(70, 170, 80);
+const BLUE: Color32 = Color32::from_rgb(70, 140, 230);
 
 impl App {
     pub fn new(ctx: egui::Context, setup: Setup, start: Start) -> Self {
@@ -279,11 +388,7 @@ impl Model {
         let v = &self.view;
         let t = &v.totals;
         let rate = t.rate_hz().map_or("-".to_owned(), |r| format!("{r:.1} Hz"));
-        ui.label(format!(
-            "{} samples, {rate}, {:.1} s",
-            v.samples,
-            v.last_t.map_or(0.0, |l| v.at(l))
-        ));
+        ui.label(format!("{} samples, {rate}, {:.1} s", v.samples, v.now));
         let errors = [
             ("frame errors", t.frame_errors.total()),
             ("message errors", t.message_errors),
@@ -350,15 +455,6 @@ impl Model {
             }
             None => {}
         }
-        if let Some((t, ev)) = v.last_event {
-            ui.label(format!("last event: {} at {:.2} s", ev.kind, v.at(t)));
-        }
-        if let Some(p) = v.live {
-            ui.label(format!(
-                "moving: {} {} {} mm from the start (uncorrected)",
-                p.x_mm, p.y_mm, p.z_mm
-            ));
-        }
         ui.separator();
         ui.label(format!(
             "{} strokes, {} rejected",
@@ -385,7 +481,7 @@ impl Model {
                     ui.end_row();
                     for (i, (t, s, stroke)) in v.strokes.iter().enumerate() {
                         ui.label(format!("{}", i + 1));
-                        ui.label(format!("{:.2}", v.at(*t)));
+                        ui.label(format!("{t:.2}"));
                         ui.label(format!("{:.2}", f64::from(s.duration_us) / 1e6));
                         ui.label(format!("{:.1}", s.distance_mm));
                         ui.label(format!("{} {} {}", s.end_mm[0], s.end_mm[1], s.end_mm[2]));
@@ -397,6 +493,82 @@ impl Model {
                     }
                 });
             });
+    }
+}
+
+impl Model {
+    /// The state as a word and a color, and what it means for the user.
+    fn state(&self) -> (&'static str, Color32, &'static str) {
+        let v = &self.view;
+        let grey = Color32::GRAY;
+        if v.ended.is_some() {
+            return ("STOPPED", grey, "The source stopped.");
+        }
+        if self.worker.is_none() {
+            return ("OFF", grey, "Not connected.");
+        }
+        if let Some(Err(_)) = v.config {
+            return ("NO CORE", Color32::RED, "The core could not be configured.");
+        }
+        match v.state {
+            None => ("WAITING", grey, "No samples yet."),
+            Some(State::Warmup) => ("WARMUP", Color32::from_rgb(220, 160, 40), "Hold still."),
+            Some(State::Still) => ("READY", GREEN, "Holding; move to draw a stroke."),
+            Some(State::Moving) => ("MOVING", BLUE, "Stop and hold to end the stroke."),
+        }
+    }
+
+    fn side(&self, ui: &mut Ui) {
+        let v = &self.view;
+        let (word, color, hint) = self.state();
+        ui.label(RichText::new(word).size(28.0).strong().color(color));
+        ui.label(hint);
+        ui.separator();
+        match v.last_event {
+            Some((t, ev)) => {
+                ui.label(format!("last event at {t:.2} s"));
+                ui.label(RichText::new(describe(&ev, v.limits)).color(tone_color(
+                    ui,
+                    match ev.kind {
+                        Kind::Stroke => Tone::Good,
+                        Kind::Rejected(_) => Tone::Warn,
+                        _ => Tone::Info,
+                    },
+                )));
+            }
+            None => {
+                ui.label("no events yet");
+            }
+        }
+        if let Some(p) = v.live {
+            ui.label(format!(
+                "moving: {} {} {} mm from the start (uncorrected)",
+                p.x_mm, p.y_mm, p.z_mm
+            ));
+        }
+        ui.separator();
+        ui.strong("Event log");
+        egui::ScrollArea::vertical()
+            .stick_to_bottom(true)
+            .auto_shrink(false)
+            .show(ui, |ui| {
+                for e in &v.log {
+                    ui.label(
+                        RichText::new(format!("{:8.2}  {}", e.t, e.text))
+                            .monospace()
+                            .color(tone_color(ui, e.tone)),
+                    );
+                }
+            });
+    }
+}
+
+fn tone_color(ui: &Ui, tone: Tone) -> Color32 {
+    match tone {
+        Tone::Info => ui.visuals().text_color(),
+        Tone::Good => GREEN,
+        Tone::Warn => ui.visuals().warn_fg_color,
+        Tone::Error => ui.visuals().error_fg_color,
     }
 }
 
@@ -417,9 +589,61 @@ impl eframe::App for App {
         }
         let mut actions = Vec::new();
         Panel::top("source").show(ui, |ui| model.top_bar(form, ui, &mut actions));
+        Panel::right("events")
+            .resizable(true)
+            .default_size(380.0)
+            .show(ui, |ui| model.side(ui));
         CentralPanel::default().show(ui, |ui| model.central(ui));
         for a in actions {
             model.act(form, a);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::Path;
+
+    use session::reference::CoreArgs;
+
+    use super::*;
+    use crate::source::replay_updates;
+
+    /// `docs/todo.md` 3e.3: ruler-30 replayed into the view gives the events of
+    /// `core/contract/vectors/v1/README.md` in the log, each reject with its reason, and the
+    /// state follows every sample (it ends READY after the last hold).
+    #[test]
+    fn ruler_30_log_and_state() {
+        let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../data/sessions");
+        let setup = Setup::load(&CoreArgs::vectors(&dir)).expect("setup");
+        let mut view = View::default();
+        let mut moved = false;
+        for u in replay_updates(&dir.join("20261030-211435_ruler-30.bin"), setup) {
+            view.apply(u);
+            moved |= view.state == Some(State::Moving);
+        }
+        assert!(moved);
+        assert_eq!(view.state, Some(State::Still));
+        assert!(view.limits.is_some());
+
+        let count = |p: &str| view.log.iter().filter(|e| e.text.starts_with(p)).count();
+        assert_eq!(count("STROKE"), 4);
+        assert_eq!(count("REJ SHORT: "), 3);
+        assert_eq!(count("REJ DRIFT: v_end "), 1);
+        assert_eq!(view.strokes.len(), 4);
+        // Each stroke line got its summary.
+        assert!(
+            view.log
+                .iter()
+                .filter(|e| e.text.starts_with("STROKE"))
+                .all(|e| e.text.contains("|d| "))
+        );
+        // The session clock only goes forward.
+        assert!(
+            view.log
+                .iter()
+                .zip(view.log.iter().skip(1))
+                .all(|(a, b)| a.t <= b.t)
+        );
     }
 }

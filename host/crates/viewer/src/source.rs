@@ -260,6 +260,23 @@ fn live(
     }
 }
 
+/// Every update of a replay at full speed, for tests of what the UI gets.
+#[cfg(test)]
+pub(crate) fn replay_updates(file: &Path, setup: Setup) -> Vec<Update> {
+    let (_control, control_rx) = mpsc::channel();
+    let (tx, rx) = mpsc::channel();
+    let stop = replay(
+        file,
+        setup,
+        f64::INFINITY,
+        &control_rx,
+        &Out { tx, repaint: || {} },
+    )
+    .expect("replay");
+    assert!(matches!(stop, Stop::End));
+    rx.try_iter().collect()
+}
+
 #[cfg(test)]
 mod tests {
     use gesture_core::{Core, GcSample, Kind, Reject};
@@ -296,19 +313,7 @@ mod tests {
             }
         }
 
-        let (control, control_rx) = mpsc::channel();
-        let (tx, rx) = mpsc::channel();
-        let stop = replay(
-            &file,
-            Setup::load(&core).expect("setup"),
-            f64::INFINITY,
-            &control_rx,
-            &Out { tx, repaint: || {} },
-        )
-        .expect("replay");
-        assert!(matches!(stop, Stop::End));
-        drop(control);
-        let updates: Vec<Update> = rx.try_iter().collect();
+        let updates = replay_updates(&file, Setup::load(&core).expect("setup"));
 
         assert_eq!(
             updates

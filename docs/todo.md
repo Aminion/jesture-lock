@@ -205,9 +205,16 @@ the serial port testable without the board.
    `strokes` (`Summary`, `run`, moved from the CLI) and `serial::ports`. Live without
    `--bias` starts from zero bias (the core updates it in holds). The test replays ruler-30
    through the worker path and matches a direct core run sample by sample (events, live
-   points, strokes) and `strokes::run`. Not yet run against the board.
-3. [ ] State indicator: WARMUP / READY / MOVING, and the last event with its reject reason
+   points, strokes) and `strokes::run`. Run live on the board with the `stream` firmware.
+3. [x] State indicator: WARMUP / READY / MOVING, and the last event with its reject reason
    (`REJ SHORT`), so a missing stroke shows why. Event log in the side panel.
+   Done: right side panel. The state follows every sample (also `NONE` events); the last
+   event and each log line give a reject's reason against the core's limits, which
+   `Update::Started` now carries (`REJ SHORT: <dur> s < <min> s`, `REJ DRIFT: v_end <v> > <max>
+   mm/s`; SHORT with a passing duration means the extent). STROKE lines get |d| and extent
+   from the summary. The log keeps the last 1000 lines; its clock (MCU time) goes on across
+   an MCU reset. Test: ruler-30 replayed into the view logs 4 STROKE, 3 REJ SHORT, 1 REJ
+   DRIFT and ends READY.
 4. [ ] Stroke capture, first as a plain 2D top view: while moving, the live path (`gc_live`,
    uncorrected); at `STROKE` replace it with the corrected points, so the jump shows the
    drift; a rejected move greys out. The last stroke stays until the next. Beside it the

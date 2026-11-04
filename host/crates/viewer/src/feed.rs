@@ -18,7 +18,8 @@ pub enum Update {
     Started {
         why: check::Event,
         hello: Hello,
-        config: Result<String, String>,
+        /// The config line and the stroke checks, or why there is no core.
+        config: Result<(String, Limits), String>,
     },
     /// A sample fed to the core: unwrapped MCU time (us), the event, `gc_live`.
     Sample {
@@ -35,6 +36,15 @@ pub enum Update {
     Health(check::Totals),
     /// The source stopped: the end of a replay (`None`) or an error.
     Ended(Option<String>),
+}
+
+/// The stroke checks of the running core (`GcConfig`), to say why a move was rejected.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Limits {
+    pub min_stroke_us: u32,
+    pub max_stroke_us: u32,
+    pub min_extent_mm: u16,
+    pub max_v_end_mm_s: u16,
 }
 
 /// Stream health plus one core, restarted with the stream.
@@ -122,11 +132,20 @@ impl Feed {
         let config = self
             .setup
             .config(&hello, || Ok(fallback))
-            .and_then(|(cfg, about)| Ok((Core::new(&cfg.gc())?, about)));
+            .and_then(|(cfg, about)| {
+                let gc = cfg.gc();
+                let limits = Limits {
+                    min_stroke_us: gc.min_stroke_us,
+                    max_stroke_us: gc.max_stroke_us,
+                    min_extent_mm: gc.min_extent_mm,
+                    max_v_end_mm_s: gc.max_v_end_mm_s,
+                };
+                Ok((Core::new(&gc)?, about, limits))
+            });
         let config = match config {
-            Ok((core, about)) => {
+            Ok((core, about, limits)) => {
                 self.core = Some(core);
-                Ok(about.trim_end().to_owned())
+                Ok((about.trim_end().to_owned(), limits))
             }
             Err(e) => {
                 self.core = None;
