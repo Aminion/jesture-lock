@@ -6,6 +6,7 @@ mod check;
 mod events;
 mod path;
 mod stats;
+mod synth;
 mod vector;
 
 use std::fs::{self, File};
@@ -85,6 +86,13 @@ enum Command {
         /// Output file.
         #[arg(long)]
         out: PathBuf,
+    },
+    /// Write every committed test vector (`data/vectors/README.md`): from the recordings
+    /// in `vector::SESSIONS`, and the synthetic ones (`synth.rs`).
+    Vectors {
+        /// The `data` directory.
+        #[arg(long, default_value = "../data")]
+        data: PathBuf,
     },
     Record {
         #[command(flatten)]
@@ -454,6 +462,7 @@ fn main() -> anyhow::Result<()> {
             print!("{}", events::report(&rec, &cfg.gc())?);
             Ok(())
         }
+        Command::Vectors { data } => vector::write_all(&data),
         Command::Vector {
             reference,
             samples,

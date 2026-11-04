@@ -96,7 +96,7 @@ host or the firmware.
 
 ### 3c: C++ implementation
 
-1. [ ] `core/`: still detection, rest calibration, tilt from the gyro, gravity removal,
+1. [x] `core/`: still detection, rest calibration, tilt from the gyro, gravity removal,
    double integration, zero-velocity correction, as `docs/core.md`. Integer only; M0+ has
    no hardware divide, so measure `gc_feed` on the board (worst case: the stroke-start
    replay) against the 9.6 ms sample period (16 MHz; 64-bit multiplies and `rdiv` are
@@ -125,29 +125,30 @@ host or the firmware.
      16 MHz for I2C and UART): same digest; mean 392 us, worst 6.6 ms (stroke end),
      3.4 ms (replay), none over the period. 3.5x, not 4x (wait states). `stream` at
      64 MHz: `check --seconds 20` clean (0 missed, 0 errors).
-   - Spec question: "append the snapshot point" also when a point already sits at
-     t = T (the snapshot sample was stored), giving two equal points. Harmless, but
-     decide before 3c.2 whether v1 means it.
-   - Spec gap for 3c.2: the correction `rdiv(rdiv(v * t, 10^6) * t, 2 T)` overflows
-     int64 for |v_end| > ~215 m/s at T ~ 6.5 s; "Ranges" covers |v| < 10 m/s only. A
-     hand cannot get there, a synthetic vector can (~3.5 g held while MOVING). Fix:
-     run CLIPPED, SHORT (duration) and DRIFT before the correction (a rejection shows
-     neither points nor extent, so the outputs stay the same), bounding v by
-     max_v_end_mm_s (unless it is 65535).
+   - [x] Spec gaps closed in `core.md` (2026-11-04), outputs unchanged on every defined
+     input (board digest still 5f314142): the snapshot point is appended even on a point
+     at t = T (two equal points, as v1 means it); CLIPPED, SHORT (duration) and DRIFT run
+     before the cut and the correction, DRIFT on the unsaturated v_end, which bounds the
+     correction products for any config; c and step are uint32, `info.step` saturates;
+     "Ranges" derived from the gates instead of a hand's range.
    - The v_end tolerance is the rotation step: with `path` switched to the same
      first-order step, every session agrees to within the rounding (checked once).
-   - Spec gap for 3c.2: the sample counter c and `step` have no width in `core.md`. The
-     C++ keeps both uint32; `gc_stroke_info.step` is uint16, so it overflows only with
-     max_stroke_us / dt > 2^21 samples (dt < 4 us). Bound it (a minimum dt, or saturate
-     step) before the synthetic vectors probe it.
-2. [ ] Conformance vectors as data files (raw recording in -> events and path out),
-   checked through `core.h` only, so any implementation runs the same suite. Synthetic
-   strokes (known path -> ideal IMU signals) plus real recordings.
-   Config defaults (hand, +-4 g / 500 dps; from the measurements above): still gyro std
-   171 LSB (3 dps), accel std 123 (15 mg), gyro rate 229 (4 dps); table preset 29 / 25 /
-   57 (0.5 dps, 3 mg, 1 dps); hold_n 20; bias update 11 (0.2 dps), 16 (2 mg); clip 32700;
-   max_dt 14423 us; stroke 150000..4000000 us; min extent 20 mm; max v_end 300 mm/s;
-   calibration from `tumble-4g`, bias from `rest-table-4g`.
+   - Open: "Ranges" needs |gyro_bias_q8| <= 2^23 (int16 range), which `gc_init` does not
+     check; a v2 could make it a "Valid" rule.
+2. [x] Conformance vectors as data files (`data/vectors/README.md`): 22 GCV1 files, the
+   board vector, 4 whole sessions (ruler-15 near the extent threshold, ruler-30, hand-hold,
+   air-lines) and 17 synthetic cases (`gesture-cli vectors`, `synth.rs`: min-jerk moves
+   and turns through the inverse calibration; every scale, gaps, LONG, CLIPPED in the
+   replay, SHORT both ways, DRIFT at 65535, clock wraps, compaction, and a buffer still
+   full at the end, so the end step compacts: checked to reach that branch). Run by `ctest` (`core_vectors`, `core.h` only) and `cargo test`, which
+   also checks each synthetic case's events and true end point apart from the digest.
+   Synthetic lines end within 2 mm of the truth.
+   Config defaults (hand, +-4 g / 500 dps; from the measurements above, used by the
+   synthetic cases at each scale): still gyro std 171 LSB (3 dps), accel std 123 (15 mg),
+   gyro rate 229 (4 dps); table preset 29 / 25 / 57 (0.5 dps, 3 mg, 1 dps); hold_n 20;
+   bias update 11 (0.2 dps), 16 (2 mg); clip 32700; max_dt 14423 us; stroke
+   150000..4000000 us; min extent 20 mm; max v_end 300 mm/s; calibration from
+   `tumble-4g`, bias from `rest-table-4g`.
 3. [ ] Build: the `gesture-core` build.rs and the firmware link "a static lib
    `gesture_core` providing `core.h`"; the implementation is one build option.
    build.rs already builds `core/` via the `cmake` crate and links `gesture_core`

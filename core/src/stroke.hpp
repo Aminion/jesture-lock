@@ -199,10 +199,30 @@ constexpr void integrate(Stroke& s, const Raw& x, const gc_config& cfg, const Sc
     store(s);
 }
 
-// End at the snapshot: cut the points back to it, append it, remove the leftover velocity
-// (zero-velocity correction), then the end-hold checks. Returns 0 (a stroke) or GC_REJ_*.
+// End at the snapshot: the checks that need no points (CLIPPED, SHORT by duration, DRIFT),
+// then cut the points back to the snapshot, append it, remove the leftover velocity
+// (zero-velocity correction) and check the extent. Returns 0 (a stroke) or GC_REJ_*.
+// DRIFT before the correction bounds v_end there (docs/core.md "Ranges").
 [[nodiscard]] constexpr std::uint8_t finish(Stroke& s, const gc_config& cfg) {
     const std::uint32_t big_t = s.snap.t - s.t_s0;
+    std::int64_t v_max = 0;
+    for (const std::int64_t v : s.snap.v) {
+        v_max = std::max(v_max, v < 0 ? -v : v);
+    }
+    const std::int64_t v_end = rdiv(v_max, 1000000); // mm/s, before saturation
+    s.duration_us = big_t;
+    s.v_end_mm_s = satu16(v_end);
+
+    if (s.snap.clipped) {
+        return GC_REJ_CLIPPED;
+    }
+    if (big_t < cfg.min_stroke_us) {
+        return GC_REJ_SHORT;
+    }
+    if (std::cmp_greater(v_end, cfg.max_v_end_mm_s)) {
+        return GC_REJ_DRIFT;
+    }
+
     const std::int64_t t_end = rdiv(big_t, 100);
     while (s.n > 0 && std::cmp_greater(s.points[s.n - 1].t_100us, t_end)) {
         --s.n;
@@ -227,23 +247,7 @@ constexpr void integrate(Stroke& s, const Raw& x, const gc_config& cfg, const Sc
             extent = std::max(extent, static_cast<std::uint16_t>(x < 0 ? -x : x));
         }
     }
-    std::int64_t v_max = 0;
-    for (const std::int64_t v : s.snap.v) {
-        v_max = std::max(v_max, v < 0 ? -v : v);
-    }
-    s.duration_us = big_t;
-    s.v_end_mm_s = satu16(rdiv(v_max, 1000000));
     s.extent_mm = extent;
-
-    if (s.snap.clipped) {
-        return GC_REJ_CLIPPED;
-    }
-    if (big_t < cfg.min_stroke_us) {
-        return GC_REJ_SHORT;
-    }
-    if (s.v_end_mm_s > cfg.max_v_end_mm_s) {
-        return GC_REJ_DRIFT;
-    }
     if (s.extent_mm < cfg.min_extent_mm) {
         return GC_REJ_SHORT;
     }

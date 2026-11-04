@@ -10,5 +10,5 @@ sensor scale is in the Hello frames (`ctrl1_xl`, `ctrl2_g`).
 `sessions/<same stem>.toml`: label, note (how the board was held, what moved), start time,
 duration, and the stream health from the recording (samples, rate, failures).
 
-`vectors/`: board test vectors cut from sessions (`gesture-cli vector`), embedded in the
-`recognize` firmware; see `vectors/README.md`.
+`vectors/`: the conformance vectors of `core.h`, cut from sessions or synthetic
+(`gesture-cli vectors`); one is embedded in the `recognize` firmware. See `vectors/README.md`.

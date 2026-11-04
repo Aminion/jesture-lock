@@ -8,6 +8,18 @@ gesture_target_options(core_test)
 
 add_test(NAME core_test COMMAND core_test)
 
+# The conformance vectors, through core.h only (no core/src on the include path).
+add_executable(core_vectors
+    core_vectors.cpp
+)
+target_link_libraries(core_vectors PRIVATE gesture_core)
+gesture_target_options(core_vectors)
+# Data, not sources: every committed vector (gesture-cli vectors writes them).
+file(GLOB GESTURE_VECTORS CONFIGURE_DEPENDS
+    ${PROJECT_SOURCE_DIR}/data/vectors/*.gcv
+    ${PROJECT_SOURCE_DIR}/data/vectors/*/*.gcv)
+add_test(NAME core_vectors COMMAND core_vectors ${GESTURE_VECTORS})
+
 # core.h compiled as C11, the oldest C the contract supports. Build-only: a C++-only
 # construct in the header fails the build.
 enable_language(C)

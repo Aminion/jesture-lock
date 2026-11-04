@@ -3,7 +3,8 @@
 The contract between the core and its callers (the `recognize` firmware,
 `host/crates/gesture-core`). Change this document first, then the implementation and the
 FFI. An implementation conforms when it gives the same events and points, bit for bit, on
-the conformance vectors, run through `core.h` only.
+the conformance vectors (`data/vectors/README.md`: format, digest, runner), run through
+`core.h` only.
 
 ABI version: **1**, frozen 2026-10-30: the 3D path of one stroke (still detection, gyro
 tilt, gravity removal, double integration, zero-velocity correction). Any change to a
@@ -130,7 +131,9 @@ Events report changes; `state` is the state after the sample.
 | 4      | `GC_REJ_TIME_GAP`  | at once  | a time gap during the move |
 | 5      | `GC_REJ_DRIFT`     | end hold | v_end_mm_s > max_v_end_mm_s |
 
-End-hold checks in order: CLIPPED, SHORT (duration), DRIFT, SHORT (extent).
+End-hold checks in order: CLIPPED, SHORT (duration), DRIFT, SHORT (extent). DRIFT compares
+the leftover velocity before saturation, so a `max_v_end_mm_s` of 65535 still rejects
+more than 65535 mm/s.
 
 ### `gc_point` (8 B) and `gc_stroke_info` (24 B)
 
@@ -246,21 +249,40 @@ At sample k (first non-quiet window), with ring indices relative to k:
 - velocity, nm/s: `v_i += rdiv((f_i - g_i) * dt * 980665, 10^8)` (9.80665 m/s^2 per g).
 - position, nm: `p_i += rdiv(v_i * dt, 10^6)`, with the new v.
 - clipped flag: set if any raw reading of this sample has abs >= clip_lsb.
-- sample counter c + 1; if c is a multiple of step, store a point: `x_mm = sat16(rdiv(p, 10^6))`,
+- sample counter c + 1 (c and step are uint32: c <= max_stroke_us + 1, as dt >= 1;
+  `gc_stroke_info.step` is `satu16(step)`); if c is a multiple of step, store a point: `x_mm = sat16(rdiv(p, 10^6))`,
   `t_100us = satu16(rdiv(t - t_s0, 100))`. A full buffer first keeps points 0, 2, 4, ...
   (32 left) and doubles step; then the multiple-of-step test is repeated.
 - `gc_live` gives the same rounding of the current p and t as a stored point, whether or
   not this sample was stored.
 
 ### Stroke end (at the snapshot)
-- T = t_snap - t_s0; drop points with t_100us > rdiv(T, 100); append the snapshot point
-  (compacting first if the buffer is full).
+- T = t_snap - t_s0, `V = rdiv(max_i |v_end_i|, 10^6)` (mm/s, int64),
+  `v_end_mm_s = satu16(V)`; the event and `gc_stroke_info` report T and `v_end_mm_s`
+  whatever the outcome.
+- CLIPPED (the snapshot's clipped flag), SHORT (T < min_stroke_us), DRIFT
+  (V > max_v_end_mm_s): the first that holds rejects the stroke, and nothing below runs.
+- drop points with t_100us > rdiv(T, 100); append the snapshot point (compacting first if
+  the buffer is full). It is appended even when the last kept point has the same t_100us
+  (the snapshot sample was stored), giving two equal points.
 - zero-velocity correction per point, with t = 100 * t_100us:
   `c = rdiv(rdiv(v_end * t, 10^6) * t, 2 * T)` nm, `x_mm = sat16(x_mm - rdiv(c, 10^6))`.
-- `v_end_mm_s = satu16(rdiv(max_i |v_end_i|, 10^6))`; extent = largest abs coordinate.
-- checks in the order given under `gc_event`.
+- extent = largest abs coordinate over the corrected points; SHORT if extent <
+  min_extent_mm.
 
 ### Ranges
-Inputs within int16, dt <= 20000 us, gyro <= 2000 dps: `w * sg * dt` < 2^57,
-`ang_udeg * 355 * 2^23` < 2^58, accel products < 2^57, gravity < 2^62, velocity products
-< 2^60 for |f - g| < 32 g, position products < 2^48 for |v| < 10 m/s.
+Every product fits int64 for any input the gates let through (int16 readings, dt <= 20000
+us, integrated time <= max_stroke_us + 20000 <= 6573500 us), given one condition on the
+config: |gyro_bias_q8| <= 2^23 per axis (the int16 range). The bias update moves the bias
+towards a window mean of int16 readings, so it stays in that range. `gc_init` does not
+check it; outside it the results are not specified.
+- turn: |w| <= 2^24, `w * sg * dt` < 2^55; |ang_udeg| < 9.2e7 (92 degrees in one sample),
+  `ang_udeg * 355 * 2^23` < 2^58; |h| < 8.6e8 (0.80 rad), `hx^2 + hy^2 + hz^2` < 2^61.
+- q: the renormalization leaves |q|^2 <= 1 (for n < 3), and |dq|^2 = 1 + |h|^4 / 4 < 1.93,
+  so |q * dq| < 1.39 and every component stays within int32.
+- accel: `(accel - off) * gain_q30 * sa` < 2^16 * 2^31 * 2^9 = 2^56; gravity sums < 2^61.
+  |a_i|, |g_i| < 32768 * 1.1 * 488 ug = 17.6 g, |f_i| < 30.5 g, |f - g| < 48.1 g < 2^26 ug.
+- velocity: `(f - g) * dt * 980665` < 2^26 * 20000 * 980665 < 2^61; each step adds
+  < 4.8e5 nm/s per us, so |v| < 3.2e12 nm/s, `v * dt` < 2^56 and |p| < 2^45 nm.
+- correction: DRIFT runs first, so |v_end_i| < 65535.5 * 10^6 nm/s, and t <= 6553500 us:
+  `v_end * t` < 2^59, `rdiv(v_end * t, 10^6) * t` < 2^62.

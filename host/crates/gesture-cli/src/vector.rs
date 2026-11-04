@@ -22,6 +22,8 @@
 //!
 //! Structs are hashed as their C layout (`core.h`, no padding in any of them).
 
+use std::path::Path;
+
 use anyhow::{Context, bail, ensure};
 use gesture_core::Core;
 use gesture_core::ffi::{
@@ -209,6 +211,50 @@ fn digest(cfg: &GcConfig, samples: &[GcSample]) -> anyhow::Result<Expect> {
     })
 }
 
+/// The committed vectors from recordings, under `data/vectors/`: (file, session under
+/// `data/sessions/`, samples from the start; `None`: all). All calibrated with `tumble`
+/// (the motion sessions are +-2 g), the initial gyro bias from `rest-table`, hand
+/// thresholds. The first is the board vector, embedded by `recognize`.
+pub const SESSIONS: &[(&str, &str, Option<usize>)] = &[
+    ("air-lines.gcv", "20261030-212525_air-lines", Some(2400)),
+    ("sessions/air-lines.gcv", "20261030-212525_air-lines", None),
+    ("sessions/ruler-15.gcv", "20261030-212208_ruler-15", None),
+    ("sessions/ruler-30.gcv", "20261030-211435_ruler-30", None),
+    ("sessions/hand-hold.gcv", "20261030-210755_hand-hold", None),
+];
+
+/// Builds the vector of `SESSIONS` entry `(_, session, n)` from the sessions in `data`.
+pub fn session_vector(data: &Path, session: &str, n: Option<usize>) -> anyhow::Result<Vec<u8>> {
+    let dir = data.join("sessions");
+    let (rec, cfg, _) = crate::reference_config(&crate::ReferenceArgs {
+        file: dir.join(format!("{session}.bin")),
+        calib: Some(dir.join("20261030-205757_tumble.bin")),
+        hold: crate::Hold::Hand,
+        bias: Some(dir.join("20261030-183544_rest-table.bin")),
+    })?;
+    let n = n.unwrap_or(rec.samples.len());
+    build(&rec, &cfg.gc(), n)
+}
+
+/// Writes every committed vector: `SESSIONS`, then the synthetic ones (`synth.rs`).
+pub fn write_all(data: &Path) -> anyhow::Result<()> {
+    let dir = data.join("vectors");
+    std::fs::create_dir_all(dir.join("sessions"))?;
+    for (file, session, n) in SESSIONS {
+        let bytes = session_vector(data, session, *n)?;
+        let out = dir.join(file);
+        std::fs::write(&out, &bytes).with_context(|| format!("writing {}", out.display()))?;
+        let (expect, _) = check(&bytes)?;
+        println!(
+            "{file:<24} {:>5} samples {:>3} events  digest {:08x}",
+            u32_at(&bytes, 4),
+            expect.events,
+            expect.digest
+        );
+    }
+    crate::synth::write_all(&dir.join("synth"))
+}
+
 /// The vector of the first `n` samples of a recording.
 pub fn build(rec: &Recording, cfg: &GcConfig, n: usize) -> anyhow::Result<Vec<u8>> {
     ensure!(
@@ -224,10 +270,15 @@ pub fn build(rec: &Recording, cfg: &GcConfig, n: usize) -> anyhow::Result<Vec<u8
             accel: s.accel,
         })
         .collect();
-    let expect = digest(cfg, &samples)?;
-    let mut b = Vec::with_capacity(HEADER + SAMPLE_SIZE * n);
+    encode(cfg, &samples)
+}
+
+/// The vector of `samples` under `cfg`, with the result the core gives on them.
+pub fn encode(cfg: &GcConfig, samples: &[GcSample]) -> anyhow::Result<Vec<u8>> {
+    let expect = digest(cfg, samples)?;
+    let mut b = Vec::with_capacity(HEADER + SAMPLE_SIZE * samples.len());
     b.extend(MAGIC);
-    b.extend(u32::try_from(n)?.to_le_bytes());
+    b.extend(u32::try_from(samples.len())?.to_le_bytes());
     b.extend(expect.events.to_le_bytes());
     b.extend(expect.digest.to_le_bytes());
     b.extend(config_bytes(cfg));
@@ -235,8 +286,8 @@ pub fn build(rec: &Recording, cfg: &GcConfig, n: usize) -> anyhow::Result<Vec<u8
     Ok(b)
 }
 
-/// Reads a vector: its stored result, and the result the core gives on it now.
-pub fn check(b: &[u8]) -> anyhow::Result<(Expect, Expect)> {
+/// A vector's parts: its stored result, config and samples.
+pub fn decode(b: &[u8]) -> anyhow::Result<(Expect, GcConfig, Vec<GcSample>)> {
     ensure!(b.len() >= HEADER && b[..4] == MAGIC, "not a GCV1 vector");
     let n = usize::try_from(u32_at(b, 4))?;
     ensure!(
@@ -249,12 +300,18 @@ pub fn check(b: &[u8]) -> anyhow::Result<(Expect, Expect)> {
         digest: u32_at(b, 12),
     };
     let cfg = config_from(&b[16..HEADER]);
-    let samples: Vec<GcSample> = b[HEADER..]
+    let samples = b[HEADER..]
         .as_chunks::<SAMPLE_SIZE>()
         .0
         .iter()
         .map(sample_from)
         .collect();
+    Ok((stored, cfg, samples))
+}
+
+/// Reads a vector: its stored result, and the result the core gives on it now.
+pub fn check(b: &[u8]) -> anyhow::Result<(Expect, Expect)> {
+    let (stored, cfg, samples) = decode(b)?;
     let now = digest(&cfg, &samples).context("replaying the vector")?;
     Ok((stored, now))
 }
@@ -308,24 +365,21 @@ mod tests {
         assert_eq!(config_from(&config_bytes(&cfg)), cfg);
     }
 
-    /// The committed board vector still matches the core, and regenerates to the same
-    /// bytes with the command in `data/vectors/README.md`.
+    /// Every committed vector from a recording still matches the core, and regenerates
+    /// to the same bytes (`gesture-cli vectors`).
     #[test]
-    fn board_vector_is_current() {
-        let file = data("vectors/air-lines.gcv");
-        let bytes = std::fs::read(&file).expect("vector file");
-        let (stored, now) = check(&bytes).expect("vector");
-        assert_eq!(stored, now, "core changed: regenerate {}", file.display());
-        assert!(stored.events >= 15, "{stored:?}");
-
-        let (rec, cfg, _) = crate::reference_config(&crate::ReferenceArgs {
-            file: data("sessions/20261030-212525_air-lines.bin"),
-            calib: Some(data("sessions/20261030-205757_tumble.bin")),
-            hold: crate::Hold::Hand,
-            bias: Some(data("sessions/20261030-183544_rest-table.bin")),
-        })
-        .expect("config");
-        let n = usize::try_from(u32_at(&bytes, 4)).expect("n");
-        assert!(build(&rec, &cfg.gc(), n).expect("build") == bytes);
+    fn session_vectors_are_current() {
+        for (file, session, n) in SESSIONS {
+            let path = data("vectors").join(file);
+            let bytes = std::fs::read(&path).expect("vector file");
+            let (stored, now) = check(&bytes).expect("vector");
+            assert_eq!(
+                stored, now,
+                "core changed: run `gesture-cli vectors` ({file})"
+            );
+            assert!(stored.events >= 10, "{file}: {stored:?}");
+            let built = session_vector(&data(""), session, *n).expect("build");
+            assert!(built == bytes, "{file}: run `gesture-cli vectors`");
+        }
     }
 }

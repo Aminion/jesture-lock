@@ -485,6 +485,18 @@ static_assert(end_with([](gcore::Stroke&, gc_config& c) { c.min_extent_mm = 151;
               GC_REJ_SHORT);
 static_assert(end_with([](gcore::Stroke&, gc_config& c) { c.min_extent_mm = 150; }) == 0);
 
+// DRIFT compares before saturation: 70 m/s is rejected even at max_v_end_mm_s 65535, and
+// before the correction (whose products it bounds). The event still gets T and v_end.
+static_assert([] {
+    gcore::Stroke s = ended();
+    s.snap.v = {70000000000, 0, 0};
+    gc_config cfg = valid_config();
+    cfg.max_v_end_mm_s = 65535;
+    const std::uint8_t reason = gcore::finish(s, cfg);
+    return reason == GC_REJ_DRIFT && !s.done && s.v_end_mm_s == 65535 &&
+           s.duration_us == 1000000 && s.n == 4;
+}());
+
 // A full buffer at the end: compacted first, then the snapshot point appended.
 static_assert([] {
     gcore::Stroke s = run(fresh({}), raw({0, 0, 0}, {0, 0, 0}), 63); // 64 points
