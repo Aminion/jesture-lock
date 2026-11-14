@@ -313,3 +313,20 @@ Not done: when data-ready edges stop (INT1 low, no edge for some periods), run
 `lsm6ds3_init` again and count it in `Status`. A glitch would then cost one hold, not the
 run. It needs a line in `docs/protocol.md` if a counter is added or `stuck` is reused.
 `gesture-cli calibrate` ends the run after 2 s without samples.
+
+## Ruler test at ±4 g with `board.cal` (2026-11-14)
+
+`gesture-cli strokes <file> --hold table`, linked `board.cal`:
+
+| Run | What | Result |
+|---|---|---|
+| `ruler-15-4g` | 13 table slides of 15 cm, 1.8-2.9 s each | all 13 strokes, none rejected: 142-154 mm (mean 149.7, -0.2%), off-axis up to 7 mm, v_end 5-28 mm/s |
+| `ruler-30-4g` | 10 table slides of 30 cm, 2.6-3.6 s each (the first stroke of the session, 242 mm with v_end 103 mm/s, is the board being placed) | 271-305 mm (mean 294, -2%): six within 3% of 300, four 6-10% short; off-axis up to 15 mm, vertical up to 21 mm, v_end 8-34 mm/s |
+
+- The +11% of `ruler-30` (2026-10-30) did not come back. Those slides ran up to 4.8 s, these
+  stay under 4 s; the cause is still not established.
+- Calibration: `--calib none` gives lengths about 1% shorter (the x gain, 1.0096); the fit
+  of `tumble-4g` gives the same lengths as `board.cal` to the millimetre. A flat slide
+  cannot show more: the z offset cancels when the board does not tilt.
+- With the hand thresholds `ruler-15-4g` gives 7 strokes and 15 rejected fragments: table
+  slides need the table preset, as on 2026-10-30.

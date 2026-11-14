@@ -17,7 +17,8 @@ use crate::recording::{self, Recording, V3};
 #[derive(Debug, Clone, Args)]
 pub struct CoreArgs {
     /// Accelerometer calibration: a calibration file (`calibrate`, `.cal`; it also gives
-    /// the initial gyro bias) or a tumble session to fit (`calib`).
+    /// the initial gyro bias), a tumble session to fit (`calib`), or `none` for the raw
+    /// accelerometer [default: the linked board.cal where its scales fit].
     #[arg(long)]
     pub calib: Option<PathBuf>,
     /// Still thresholds: on a table or in the hand.
@@ -55,6 +56,9 @@ pub struct ReferenceArgs {
     pub core: CoreArgs,
 }
 
+/// `--calib none`: no accelerometer calibration, not even the linked file.
+pub const NO_CALIB: &str = "none";
+
 /// Where the board rests between strokes.
 #[derive(Clone, Copy, Debug, ValueEnum)]
 pub enum Hold {
@@ -87,7 +91,7 @@ pub struct Setup {
 impl Setup {
     pub fn load(CoreArgs { calib, hold, bias }: &CoreArgs) -> anyhow::Result<Self> {
         let (mut fit, mut file) = (None, None);
-        if let Some(c) = calib {
+        if let Some(c) = calib.as_deref().filter(|c| *c != Path::new(NO_CALIB)) {
             let bytes = fs::read(c).with_context(|| format!("reading {}", c.display()))?;
             if bytes.starts_with(&calfile::MAGIC) {
                 file = Some(CalFile::parse(&bytes).with_context(|| c.display().to_string())?);

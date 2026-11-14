@@ -231,6 +231,7 @@ The firmware and the tools pick up the new file at the next build. The tool says
 - The `session` crate links `board.cal` with `include_bytes!` and checks it in a test.
 - The linked file is the default calibration when its scales match the stream's. This
   changes the default: today a tool without `--calib` uses no accelerometer calibration.
+- `--calib none` gives the raw accelerometer (no linked file either), for comparisons.
 - When the scales do not match (every session of 2026-10-30 before `rest-table-4g` is
   +-2 g / 250 dps), the default stays as today, raw, and the config line says so.
 - `calib` (the report on a tumble session) and `vectors` are unchanged.

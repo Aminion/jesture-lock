@@ -1,0 +1,9 @@
+label = "ruler-30-4g"
+note = "30 cm along ruler, x axis, hold 2 s each end; +-4 g / 500 dps, after board.cal of 2026-11-14"
+started = "2026-11-14T22:35:46+02:00"
+seconds = 90
+
+[stream]
+samples = 9362
+rate_hz = 104.153
+failures = []
