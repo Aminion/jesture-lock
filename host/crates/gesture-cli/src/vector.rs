@@ -31,9 +31,15 @@ use gesture_core::{Core, GcConfig, GcPoint, GcSample, GcStrokeInfo, Kind, Stroke
 use session::recording::{Recording, gc_sample};
 
 pub const MAGIC: [u8; 4] = *b"GCV1";
-const HEADER: usize = 84;
-const CONFIG_SIZE: usize = 68;
-const SAMPLE_SIZE: usize = 16;
+/// Header field offsets (table above).
+const SAMPLES_AT: usize = 4;
+const EVENTS_AT: usize = 8;
+const DIGEST_AT: usize = 12;
+const CONFIG_AT: usize = 16;
+const CONFIG_SIZE: usize = size_of::<GcConfig>();
+const HEADER: usize = CONFIG_AT + CONFIG_SIZE;
+const SAMPLE_SIZE: usize = size_of::<GcSample>();
+const _: () = assert!(HEADER == 84);
 /// The firmware's `gc_stroke` buffer: the core never holds more points.
 const POINTS_CAP: u16 = 64;
 
@@ -276,18 +282,21 @@ pub fn encode(cfg: &GcConfig, samples: &[GcSample]) -> anyhow::Result<Vec<u8>> {
 
 /// A vector's parts: its stored result, config and samples.
 pub fn decode(b: &[u8]) -> anyhow::Result<(Expect, GcConfig, Vec<GcSample>)> {
-    ensure!(b.len() >= HEADER && b[..4] == MAGIC, "not a GCV1 vector");
-    let n = usize::try_from(u32_at(b, 4))?;
+    ensure!(
+        b.len() >= HEADER && b[..MAGIC.len()] == MAGIC,
+        "not a GCV1 vector"
+    );
+    let n = usize::try_from(u32_at(b, SAMPLES_AT))?;
     ensure!(
         b.len() == HEADER + SAMPLE_SIZE * n,
         "{} bytes for {n} samples",
         b.len()
     );
     let stored = Expect {
-        events: u32_at(b, 8),
-        digest: u32_at(b, 12),
+        events: u32_at(b, EVENTS_AT),
+        digest: u32_at(b, DIGEST_AT),
     };
-    let cfg = config_from(&b[16..HEADER]);
+    let cfg = config_from(&b[CONFIG_AT..HEADER]);
     let samples = b[HEADER..]
         .as_chunks::<SAMPLE_SIZE>()
         .0

@@ -18,8 +18,13 @@
 
 namespace {
 
-constexpr std::size_t header_size = 84;
+// Header field offsets (vectors/v1/README.md).
+constexpr std::size_t samples_at = 4;
+constexpr std::size_t events_at = 8;
+constexpr std::size_t digest_at = 12;
 constexpr std::size_t config_at = 16;
+constexpr std::size_t header_size = config_at + sizeof(gc_config);
+static_assert(header_size == 84);
 constexpr std::uint16_t points_cap = 64;
 constexpr std::array<std::uint8_t, 4> magic{'G', 'C', 'V', '1'};
 
@@ -32,13 +37,16 @@ template <typename T> T read_at(std::span<const std::uint8_t> b, std::size_t at)
 }
 
 // FNV-1a 32 over the C layouts.
+constexpr std::uint32_t fnv_offset_basis = 0x811c'9dc5;
+constexpr std::uint32_t fnv_prime = 0x0100'0193;
+
 struct Fnv {
-    std::uint32_t h = 0x811c'9dc5;
+    std::uint32_t h = fnv_offset_basis;
 };
 
 template <typename T> void hash(Fnv& f, const T& v) {
     for (const std::uint8_t b : std::bit_cast<std::array<std::uint8_t, sizeof(T)>>(v)) {
-        f.h = (f.h ^ b) * 0x0100'0193U;
+        f.h = (f.h ^ b) * fnv_prime;
     }
 }
 
@@ -64,11 +72,11 @@ std::vector<std::uint8_t> read_file(const char* path) {
 // Replays one vector. Returns false (with a message) if the file is malformed or gc_init
 // rejects its config.
 bool replay(std::span<const std::uint8_t> b, std::string_view name, Result& r) {
-    if (b.size() < header_size || !std::ranges::equal(b.first(4), magic)) {
+    if (b.size() < header_size || !std::ranges::equal(b.first(magic.size()), magic)) {
         std::println(stderr, "{}: not a GCV1 vector", name);
         return false;
     }
-    const auto n = read_at<std::uint32_t>(b, 4);
+    const auto n = read_at<std::uint32_t>(b, samples_at);
     if (b.size() != header_size + (std::size_t{n} * sizeof(gc_sample))) {
         std::println(stderr, "{}: {} bytes for {} samples", name, b.size(), n);
         return false;
@@ -118,8 +126,8 @@ int main(int argc, char** argv) {
             ++failed;
             continue;
         }
-        const Result want{.events = read_at<std::uint32_t>(b, 8),
-                          .digest = read_at<std::uint32_t>(b, 12)};
+        const Result want{.events = read_at<std::uint32_t>(b, events_at),
+                          .digest = read_at<std::uint32_t>(b, digest_at)};
         if (r.events != want.events || r.digest != want.digest) {
             std::println(stderr, "{}: {} events, digest {:08x}; the vector says {}, {:08x}", path,
                          r.events, r.digest, want.events, want.digest);

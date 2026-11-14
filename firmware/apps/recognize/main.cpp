@@ -71,8 +71,14 @@ constexpr auto vector = std::to_array<std::uint8_t>({
 #pragma clang diagnostic pop
 #endif
 
-constexpr std::size_t header_size = 84;
+// Header field offsets.
+constexpr std::size_t magic_at = 0;
+constexpr std::size_t samples_at = 4;
+constexpr std::size_t events_at = 8;
+constexpr std::size_t digest_at = 12;
 constexpr std::size_t config_at = 16;
+constexpr std::size_t header_size = config_at + sizeof(gc_config);
+static_assert(header_size == 84);
 
 template <typename T> constexpr T read_at(std::size_t at) {
     std::array<std::uint8_t, sizeof(T)> b{};
@@ -80,21 +86,24 @@ template <typename T> constexpr T read_at(std::size_t at) {
     return std::bit_cast<T>(b);
 }
 
-constexpr std::uint32_t vector_samples = read_at<std::uint32_t>(4);
-static_assert(read_at<std::uint32_t>(0) == 0x31564347, "not a GCV1 vector"); // "GCV1"
+constexpr std::uint32_t vector_samples = read_at<std::uint32_t>(samples_at);
+static_assert(read_at<std::uint32_t>(magic_at) == 0x31564347, "not a GCV1 vector"); // "GCV1"
 static_assert(vector.size() == header_size + (vector_samples * sizeof(gc_sample)),
               "vector size does not match its sample count");
 static_assert(std::endian::native == std::endian::little, "the vector is little-endian");
 
 // --- Digest: FNV-1a 32 over the C layouts, as vector.rs ----------------------------
 
+constexpr std::uint32_t fnv_offset_basis = 0x811c'9dc5;
+constexpr std::uint32_t fnv_prime = 0x0100'0193;
+
 struct Fnv {
-    std::uint32_t h = 0x811c'9dc5;
+    std::uint32_t h = fnv_offset_basis;
 };
 
 template <typename T> void hash(Fnv& f, const T& v) {
     for (const std::uint8_t b : std::bit_cast<std::array<std::uint8_t, sizeof(T)>>(v)) {
-        f.h = (f.h ^ b) * 0x0100'0193U;
+        f.h = (f.h ^ b) * fnv_prime;
     }
 }
 
@@ -206,8 +215,8 @@ int main() {
     paint_stack();
 
     Bench b{};
-    b.expect_events = read_at<std::uint32_t>(8);
-    b.expect_digest = read_at<std::uint32_t>(12);
+    b.expect_events = read_at<std::uint32_t>(events_at);
+    b.expect_digest = read_at<std::uint32_t>(digest_at);
     b.result = std::to_underlying(run(b));
     b.stack_peak = stack_peak();
     b.magic = bench_magic;
