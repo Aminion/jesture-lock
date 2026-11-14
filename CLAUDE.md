@@ -55,7 +55,8 @@ Flash one or the other. Results of both paths on the same recording must match b
   port, stream health, calibration, the core's config, per-stroke summary: shared by the
   tools), `gesture-cli`, `viewer`.
 - `docs/`: `protocol.md` (the C++/Rust contract), `core.md` (the `core.h` contract, Step 3b),
-  `template_format.md`, `pinout.md` (MCU pins and IMU wiring),
+  `calibration.md` (calibration tool and file, proposal), `template_format.md`,
+  `pinout.md` (MCU pins and IMU wiring),
   `todo.md` (current step plan, deferred adjustments),
   `datasheets/` (vendor PDFs, gitignored; manifest + checksums committed).
 - `data/`: recorded sessions.
