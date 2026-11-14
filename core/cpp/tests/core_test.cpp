@@ -302,16 +302,16 @@ static_assert(gcore::renormalize({gcore::one_q30 + 107374, 0, 0, 0}) ==
 
 // R(identity) is the unit matrix; a quarter turn about z sends board x to start y.
 static_assert(gcore::rotation(identity) ==
-              gcore::Mat3{{{gcore::one_q30, 0, 0}, {0, gcore::one_q30, 0}, {0, 0, gcore::one_q30}}});
+              gcore::Mat3{
+                  {{gcore::one_q30, 0, 0}, {0, gcore::one_q30, 0}, {0, 0, gcore::one_q30}}});
 static_assert([] {
     constexpr std::int32_t c = 759250125; // 2^30 / sqrt(2)
     const gcore::Mat3 r = gcore::rotation({c, 0, 0, c});
     const auto near = [](std::int64_t x, std::int64_t want) {
         return x - want <= 2 && want - x <= 2;
     };
-    return near(r[1][0], gcore::one_q30) && near(r[0][1], -gcore::one_q30) &&
-           near(r[0][0], 0) && near(r[1][1], 0) && near(r[2][2], gcore::one_q30) &&
-           r[2][0] == 0 && r[0][2] == 0;
+    return near(r[1][0], gcore::one_q30) && near(r[0][1], -gcore::one_q30) && near(r[0][0], 0) &&
+           near(r[1][1], 0) && near(r[2][2], gcore::one_q30) && r[2][0] == 0 && r[0][2] == 0;
 }());
 
 // The calibration: (raw - off) * gain * sa, one rounding.
@@ -376,9 +376,8 @@ static_assert([] {
 static_assert([] {
     gcore::Stroke s = run(fresh({0, 0, 0}), raw({0, 0, 5714}, {0, 0, 0}, 10000), 90);
     // q ~ (cos 45, 0, 0, sin 45): 759279940 each for exactly 89.9955 deg.
-    if (s.v != std::array<std::int64_t, 3>{} || s.q[1] != 0 || s.q[2] != 0 ||
-        s.q[0] < 759200000 || s.q[0] > 759300000 || s.q[3] < 759200000 ||
-        s.q[3] > 759300000) {
+    if (s.v != std::array<std::int64_t, 3>{} || s.q[1] != 0 || s.q[2] != 0 || s.q[0] < 759200000 ||
+        s.q[0] > 759300000 || s.q[3] < 759200000 || s.q[3] > 759300000) {
         return false;
     }
     s = run(s, raw({0, 0, 0}, {8197, 0, 0}, 10000), 1);
@@ -437,7 +436,9 @@ constexpr gcore::Stroke ended(std::uint32_t t_s0 = 1000) {
     s.points[2] = {.x_mm = 200, .y_mm = 0, .z_mm = 0, .t_100us = 10000};
     s.points[3] = {.x_mm = 300, .y_mm = 0, .z_mm = 0, .t_100us = 15000};
     s.n = 4;
-    s.snap = {.v = {100000000, 0, -400000}, .p = {200000000, 0, 0}, .t = t_s0 + 1000000,
+    s.snap = {.v = {100000000, 0, -400000},
+              .p = {200000000, 0, 0},
+              .t = t_s0 + 1000000,
               .clipped = false};
     s.snapped = true;
     return s;
@@ -493,8 +494,8 @@ static_assert([] {
     gc_config cfg = valid_config();
     cfg.max_v_end_mm_s = 65535;
     const std::uint8_t reason = gcore::finish(s, cfg);
-    return reason == GC_REJ_DRIFT && !s.done && s.v_end_mm_s == 65535 &&
-           s.duration_us == 1000000 && s.n == 4;
+    return reason == GC_REJ_DRIFT && !s.done && s.v_end_mm_s == 65535 && s.duration_us == 1000000 &&
+           s.n == 4;
 }());
 
 // A full buffer at the end: compacted first, then the snapshot point appended.
@@ -502,8 +503,8 @@ static_assert([] {
     gcore::Stroke s = run(fresh({}), raw({0, 0, 0}, {0, 0, 0}), 63); // 64 points
     s.snap = {.v = {}, .p = {}, .t = s.t, .clipped = false};
     const std::uint8_t reason = gcore::finish(s, valid_config());
-    return reason == GC_REJ_SHORT && s.n == 33 && s.step == 2 &&
-           s.points[31].t_100us == 62 * 96 && s.points[32].t_100us == 63 * 96;
+    return reason == GC_REJ_SHORT && s.n == 33 && s.step == 2 && s.points[31].t_100us == 62 * 96 &&
+           s.points[32].t_100us == 63 * 96;
 }());
 
 // --- gc_init through the C ABI ------------------------------------------------------
@@ -639,7 +640,8 @@ void test_start(gesture_test::Tests& t) {
     // The bias has not caught up with the 10 LSB yet: the replay turns a little about x.
     check(t, s.q[0] < gcore::one_q30 && s.q[1] > 0 && s.q[2] == 0 && s.q[3] == 0);
     check(t, s.n == gcore::guard_n + 2 && s.step == 1 && !s.clipped); // point 0 + replay
-    check(t, s.v[0] > 0); // the jolt, on x
+    // The jolt, on x.
+    check(t, s.v[0] > 0);
     // MOVING: one sample integrated per feed; the bias stays.
     f.feed({10, 0, 0}, {0, 0, 8197});
     check(t, s.t == f.t && s.c == gcore::guard_n + 2);
@@ -716,8 +718,7 @@ void test_bias(gesture_test::Tests& t) {
 void test_live(gesture_test::Tests& t) {
     Feeder f(valid_config());
     gc_point p{.x_mm = 1, .y_mm = 1, .z_mm = 1, .t_100us = 1};
-    check(t, gc_live(&f.s, &p) == 0 && p.x_mm == 0 && p.y_mm == 0 && p.z_mm == 0 &&
-                 p.t_100us == 0);
+    check(t, gc_live(&f.s, &p) == 0 && p.x_mm == 0 && p.y_mm == 0 && p.z_mm == 0 && p.t_100us == 0);
     gc_event ev{};
     f.rest_until_event(200, ev);
     check(t, gc_live(&f.s, &p) == 0);
@@ -743,7 +744,7 @@ void test_live(gesture_test::Tests& t) {
 struct Move {
     std::int16_t a = 1000;
     int n = 30;
-    int brake = 30;          // samples of -a
+    int brake = 30;           // samples of -a
     std::int16_t clip_at = 0; // if not 0: the 6th sample reads this instead of a
 };
 
@@ -793,13 +794,13 @@ void test_stroke(gesture_test::Tests& t) {
     check(t, gc_stroke(&f.s, &info, pts.data(), gcore::points_n) == ev.points);
     check(t, info.duration_us == big_t && info.points == ev.points &&
                  info.v_end_mm_s == ev.v_end_mm_s && info.step == 2);
-    check(t, info.gravity_ug[0] == 0 && info.gravity_ug[1] == 0 &&
-                 info.gravity_ug[2] == 8197 * 122);
+    check(t,
+          info.gravity_ug[0] == 0 && info.gravity_ug[1] == 0 && info.gravity_ug[2] == 8197 * 122);
     // ~1.2 m/s^2 * (0.288 s)^2 = 100 mm along x, and nothing else.
     check(t, info.extent_mm >= 95 && info.extent_mm <= 110);
     const gc_point& last = pts[ev.points - 1];
-    check(t, last.t_100us == big_t / 100 && std::cmp_equal(last.x_mm, info.extent_mm) && last.y_mm == 0 &&
-                 last.z_mm == 0);
+    check(t, last.t_100us == big_t / 100 && std::cmp_equal(last.x_mm, info.extent_mm) &&
+                 last.y_mm == 0 && last.z_mm == 0);
     // The snapshot (c = 102) falls on a stored point (step 2): docs/core.md appends it
     // anyway, so the last two points are the same.
     check(t, pts[ev.points - 2].t_100us == last.t_100us && pts[ev.points - 2].x_mm == last.x_mm);

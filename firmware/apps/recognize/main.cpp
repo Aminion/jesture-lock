@@ -1,17 +1,15 @@
 // recognize firmware: IMU -> core/ on the MCU -> recognition events over UART.
 //
 // For now a board self-test of core/: at boot it replays the embedded vector
-// (core/contract/vectors/v1/, written by `gesture-cli vectors`) through gc_feed and checks that the MCU
-// build gives the same events, strokes and live points as the host build, bit for bit
-// (the digest is defined in host/crates/gesture-cli/src/vector.rs). It also times every
-// gc_feed against the sample period and measures the stack peak. The result is in
-// `bench_result`, read over SWD (core/contract/vectors/v1/README.md); the LED blinks slowly on a
-// match, fast otherwise.
+// (core/contract/vectors/v1/, written by `gesture-cli vectors`) through gc_feed and checks that the
+// MCU build gives the same events, strokes and live points as the host build, bit for bit (the
+// digest is defined in host/crates/gesture-cli/src/vector.rs). It also times every gc_feed against
+// the sample period and measures the stack peak. The result is in `bench_result`, read over SWD
+// (core/contract/vectors/v1/README.md); the LED blinks slowly on a match, fast otherwise.
 #include "gesture/board/clock.hpp"
 #include "gesture/board/gpio.hpp"
 #include "gesture/core.h"
-
-#include <stm32g0xx.h>
+#include "stm32g0xx.h"
 
 #include <algorithm>
 #include <array>
@@ -121,8 +119,7 @@ std::uintptr_t stack_pointer() {
 
 std::span<volatile std::uint32_t> free_ram(std::uintptr_t top) {
     const auto lo = std::bit_cast<std::uintptr_t>(&_ebss);
-    return {static_cast<volatile std::uint32_t*>(&_ebss),
-            (top - lo) / sizeof(std::uint32_t)};
+    return {static_cast<volatile std::uint32_t*>(&_ebss), (top - lo) / sizeof(std::uint32_t)};
 }
 
 // Fills the RAM between .bss and the current stack (less a margin) with `paint`.

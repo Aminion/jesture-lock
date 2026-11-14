@@ -21,6 +21,9 @@
 extern "C" {
 #endif
 
+/* Columns aligned by hand: the contract is read as C, not reformatted. */
+/* clang-format off */
+
 /* docs/core.md: "Enumerations are integer #define, never C enum" (another language may
  * implement this contract directly; a C++ enum has no such guarantee). */
 // NOLINTBEGIN(cppcoreguidelines-macro-usage)
@@ -131,6 +134,8 @@ gc_status gc_init(gc_state *s, const gc_config *cfg);
 gc_event  gc_feed(gc_state *s, const gc_sample *in);
 uint16_t  gc_stroke(const gc_state *s, gc_stroke_info *info, gc_point *out, uint16_t cap);
 uint16_t  gc_live(const gc_state *s, gc_point *out);
+
+/* clang-format on */
 
 #ifdef __cplusplus
 }
