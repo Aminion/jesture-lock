@@ -132,7 +132,7 @@ fn solve<const N: usize>(mut m: [[f64; N]; N], mut b: [f64; N]) -> Option<[f64; 
 
 /// Least squares for A x^2 + B y^2 + C z^2 + D x + E y + F z = 1 over the segment means
 /// (g), then offset and gain so that the corrected means have length 1.
-fn fit(points: &[V3]) -> Option<Fit> {
+pub fn fit(points: &[V3]) -> Option<Fit> {
     let mut m = [[0.0; UNKNOWNS]; UNKNOWNS];
     let mut b = [0.0; UNKNOWNS];
     for p in points {

@@ -2,7 +2,9 @@
 //! of the stream firmware, stream health, accelerometer calibration, and the core's config
 //! for a session, the core's strokes on a recording.
 
+pub mod calfile;
 pub mod calib;
+pub mod calibrate;
 pub mod check;
 pub mod config;
 pub mod recording;

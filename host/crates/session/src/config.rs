@@ -3,10 +3,11 @@
 //! in gesture-cli), already rounded to the integer formats so both decide on the same
 //! numbers; `gc()` gives the `gc_config` for the integer core.
 
-use anyhow::Context;
+use anyhow::{Context, bail};
 use gesture_core::ffi::{GC_ABI_VERSION, GcConfig};
 use protocol::Hello;
 
+use crate::calfile::CalFile;
 use crate::calib::{Fit, Still};
 use crate::recording::V3;
 
@@ -91,6 +92,33 @@ impl Config {
             bias_gyro_std: gyro_lsb(BIAS_GYRO_STD_DPS),
             bias_accel_std: accel_lsb(BIAS_ACCEL_STD_MG),
         })
+    }
+
+    /// The calibration fields replaced by a calibration file's, integer for integer: `gc()`
+    /// gives back exactly the file's values. Fails on a scale mismatch
+    /// (`docs/calibration.md`).
+    pub fn with_file(mut self, file: &CalFile) -> anyhow::Result<Self> {
+        if !file.applies_to(self.ctrl1_xl, self.ctrl2_g) {
+            bail!(
+                "the calibration file is for {} (CTRL1_XL 0x{:02x}, CTRL2_G 0x{:02x}), the stream \
+                 is {} (0x{:02x}, 0x{:02x})",
+                file.scales(),
+                file.ctrl1_xl,
+                file.ctrl2_g,
+                format_args!("{} mg/LSB, {} mdps/LSB", self.sa / 1e3, self.sg / 1e3),
+                self.ctrl1_xl,
+                self.ctrl2_g
+            );
+        }
+        self.offset_lsb = file.accel_offset_lsb.map(f64::from);
+        self.gain = file.accel_gain_q30.map(|g| f64::from(g) / Q30);
+        self.bias_lsb = file.gyro_bias_q8.map(|b| f64::from(b) / Q8);
+        Ok(self)
+    }
+
+    /// The initial gyro bias, dps.
+    pub fn bias_dps(&self) -> V3 {
+        self.bias_lsb.map(|b| b * self.sg / 1e6)
     }
 
     /// The same config for the integer core, rounded to its formats.

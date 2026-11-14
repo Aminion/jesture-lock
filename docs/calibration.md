@@ -4,13 +4,15 @@ How one board's IMU calibration is measured (`gesture-cli calibrate`), stored (t
 calibration file) and used (linked into the `recognize` firmware and the desktop tools).
 Change this document first, then the tool and both readers.
 
-Status: **proposal, nothing implemented.** Numbers marked *initial* come from the two
-tumble sessions and the `hand-hold` session of 2026-10-30 (`docs/todo.md`), not from a run of
-this tool.
+Status: implemented. The first `board.cal` is from the run of 2026-11-14
+(`data/sessions/20261114-221042_calibrate`: 12 holds, 17.7 mg raw -> 2.6 mg fitted). Numbers
+marked *initial* come from the two tumble sessions and the `hand-hold` session of
+2026-10-30 (`docs/todo.md`); that one run passed them, which is not yet a reason to change
+them.
 
 File format version: **1**.
 
-## Decisions to confirm
+## Decisions
 
 1. **Gyro bias is in the file**, taken from the table rest step. It is only the core's
    initial value (`gyro_bias_q8`); the core keeps updating it in quiet holds. Without it the
@@ -18,7 +20,7 @@ File format version: **1**.
 2. **Free holds with a coverage rule** instead of target poses: at least 12 holds, each
    axis seen near both +1 g and -1 g (see Gates).
 3. **Still thresholds are not in the file.** They are tuning, not a property of the
-   board. Both sides take them from the defaults in `docs/core.md`; see "From the file to
+   board. Both sides take them from the table below; see "From the file to
    `gc_config`" for how the two sides are kept equal.
 4. **One board, one committed file**: `data/calibration/board.cal`.
 
@@ -75,17 +77,31 @@ run (below) and in git history.
 - **Calibration fields** (`ctrl1_xl`, `ctrl2_g`, offsets, gains, bias): from the file.
   The ctrl bytes come from the stream's `Hello` on the desktop, and from the values the
   driver writes on the firmware; both are checked against the file with the scale match.
-- **Still thresholds and limits**: the defaults listed in `docs/core.md` (hand or table
-  preset, `hold_n`, `clip_lsb`, the stroke limits). The desktop computes them from the scale
-  as today (`session::config`). The firmware carries the listed LSB values as constants for
-  the one scale pair it configures (±4 g, 500 dps).
+- **Still thresholds and limits**: the table below. The desktop computes them from the
+  physical values and the stream's scale (`session::config`, `session::calib`). The
+  firmware carries the LSB column as constants for the one scale pair it configures.
+
+| Field | Value | LSB at ±4 g, 500 dps |
+|-------|-------|----------------------|
+| still_gyro_std_lsb  | hand 3 dps (table 0.5)  | 171 (29) |
+| still_accel_std_lsb | hand 15 mg (table 3)    | 123 (25) |
+| still_gyro_rate_lsb | hand 4 dps (table 1)    | 229 (57) |
+| hold_n              | 20 | |
+| bias_gyro_std_lsb   | 0.2 dps | 11 |
+| bias_accel_std_lsb  | 2 mg    | 16 |
+| clip_lsb            | 32700 | |
+| max_dt_us           | 14423 | |
+| min_stroke_us, max_stroke_us | 150000, 4000000 | |
+| min_extent_mm, max_v_end_mm_s | 20, 300 | |
+
+The firmware uses the hand preset.
 
 Both sides must produce the same 68 bytes, or the two paths stop matching bit for bit.
 Kept equal by:
-- a host test that builds the config from `board.cal` with the hand preset and compares
-  the threshold and limit fields with the values written in `docs/core.md`;
-- the firmware constants being those same written values, with a `static_assert` that the
-  file's scale fields are the pair the constants are for.
+- a host test that builds the config from the linked `board.cal` with the hand preset and
+  compares the threshold and limit fields with this table;
+- the firmware constants (`live_config` in `recognize`) being the same table, with a
+  `static_assert` that the driver's scales are the pair the LSB column is for.
 
 The conformance vectors do not change. Each `.gcv` stores its own `gc_config`, made from
 the 2026-10-30 tumble and rest sessions, and `gesture-cli vectors` keeps using those
@@ -95,28 +111,41 @@ sessions. `cargo test` still regenerates the vectors byte for byte.
 
 ```
 gesture-cli calibrate [--port /dev/ttyACM0] [--out ../data/calibration/board.cal]
-gesture-cli calibrate --replay <session.bin> [--out ...]
+gesture-cli calibrate --replay <session.bin> [--out <file>]
 ```
 
 Runs against the `stream` firmware. `--replay` runs the same steps on a recorded session
-without prompts; the tests use it.
+(one saved by this tool) without prompts and without retries: a step that does not
+complete before the file ends fails the run. It writes a file only when `--out` is given,
+and replaces it without asking.
+
+The steps are a state machine in `session::calibrate`, fed with decoded frames; the live
+run and the replay share it. The tests run the rest step on `rest-table-4g` and the holds
+on `tumble-4g` separately: neither session is a whole run, and `tumble-4g` must fail the
+coverage gate.
 
 Common to all steps:
 - Time is MCU time from the sample timestamps. Step timing, hold length and progress bars
-  count samples' time, not the PC clock.
+  count samples' time, not the PC clock. The exception is the three timeouts: 5 s without a
+  `Hello`, 30 s without a rest window, and 2 s without a sample after connect. They must
+  fire when nothing arrives, so they are PC time.
+- When samples stop for 2 s after connect (the IMU stalled: the firmware does not start it
+  again), the run ends with the MCU counters in the message. The session is saved.
 - Every step shows its name, elapsed time and a progress bar with the time left, redrawn
   in place. Plain terminal output, no TUI crate.
 - A step that fails says why and what to change, then offers: retry the step, or quit.
-  Quitting writes no calibration file.
+  Quitting writes no calibration file. Connect and rest can fail; the holds step has no
+  failure of its own: single holds are dropped (`u`, `d N`) or all of them (`r`).
 - A lost frame, CRC error, time gap (`max_dt_us`) or clipped reading inside a
   measurement window discards that window. The reason is shown.
 - All received bytes are recorded, as `record` does.
 
 ### Step 1: connect
 
-Waits for a `Hello` (sent once per second). Passes when `fw` = `stream`, `imu` = ok, and
-both scales are in the tables of `docs/core.md`. Shows the port, the scales and the sample
-rate measured over 1 s. Fails after 5 s without a `Hello`.
+Waits for a `Hello` (sent once per second) and then for samples. Passes when `fw` =
+`stream`, `imu` = ok, and both scales are in the tables of `docs/core.md`. Shows the
+scales and the sample rate measured over 1 s. Fails after 5 s without a `Hello`, or with a
+`Hello` but no samples. A changed `Hello` or an MCU reset later in the run ends the run.
 
 ### Step 2: rest on the table
 
@@ -140,6 +169,7 @@ like. Exact angles do not matter."
 The method is the gravity-norm (multi-position) fit: a still accelerometer reads 1 g in
 any orientation, so the orientations need to be different, not known.
 
+- The board may stay on the table after step 2: that position is the first hold.
 - A hold is detected automatically with the hand thresholds (3 dps, 15 mg, 4 dps): 0.5 s
   of settling, then 2.0 s measured (*initial*). The bar shows the 2.0 s filling; movement
   resets it.
@@ -151,8 +181,10 @@ any orientation, so the orientations need to be different, not known.
   seen so far in that direction and a mark once it passes the limit. The hint line names
   what is missing: "x has not pointed down yet".
 - From 9 holds on, the fit runs after every hold and its residual is shown.
-- Commands (a letter and Enter): `u` drops the last hold, `d N` drops hold N, `f`
-  finishes, `q` quits.
+- Commands (a letter and Enter): `u` drops the last hold, `d N` drops hold N, `r` drops
+  all holds, `f` finishes, `q` quits.
+- After a completed hold (accepted or not) the board must move before the next hold
+  starts.
 
 The step finishes by itself when all gates below pass. `f` before that reports which gate
 fails and continues the step.
@@ -192,12 +224,15 @@ The firmware and the tools pick up the new file at the next build. The tool says
 
 ## Use on the desktop
 
+- `path`, `events`, `strokes`, the viewer: `--calib <file>` takes either a `.cal` file or a
+  tumble session, told apart by the magic. A `.cal` file also gives the initial gyro bias;
+  `--bias <rest session>` overrides it. A `.cal` file for other scales than the stream's
+  is an error.
 - The `session` crate links `board.cal` with `include_bytes!` and checks it in a test.
-- `path`, `events`, `strokes`, the live viewer: the linked file is the default
-  calibration. `--calib <file>` overrides it and takes either a `.cal` file or a tumble
-  session, told apart by the magic. `--bias <rest session>` overrides the gyro bias.
-- This changes the default: today a tool without `--calib` uses no accelerometer
-  calibration.
+- The linked file is the default calibration when its scales match the stream's. This
+  changes the default: today a tool without `--calib` uses no accelerometer calibration.
+- When the scales do not match (every session of 2026-10-30 before `rest-table-4g` is
+  +-2 g / 250 dps), the default stays as today, raw, and the config line says so.
 - `calib` (the report on a tumble session) and `vectors` are unchanged.
 
 ## Use in the firmware
@@ -207,15 +242,19 @@ The firmware and the tools pick up the new file at the next build. The tool says
 - Checked at build time with `static_assert`: size, magic, version, CRC (`crc16` in
   `proto/` is `constexpr`), gain range, and the scale match against the driver's ctrl
   values. A bad file does not build.
-- Cost: 44 bytes of flash, no RAM beyond the `gc_config` that exists already.
-- The boot self-test keeps the config stored in the board vector. The file is for feeding
-  the live IMU into the core, which `recognize` does not do yet.
+- Cost once used: the 68 bytes of `gc_config` in flash, no RAM beyond the state.
+- The checked file and the table above make `live_config`, a `constexpr gc_config`. Nothing
+  uses it yet, so it costs no flash today: the boot self-test keeps the config stored in
+  the board vector, and `recognize` does not feed the live IMU into the core yet.
 - `stream` does not embed the file: it sends raw samples.
 
 ## Order of work
 
-1. This document agreed.
-2. File reader and writer in `session`, with tests (round trip, each rejection).
-3. `calibrate` with `--replay`, tested on `tumble-4g`; then a real run produces the first
-   `board.cal`.
-4. Linking: desktop default, then `recognize`.
+1. This document agreed. Done.
+2. File reader and writer in `session`, with tests (round trip, each rejection). Done.
+3. `calibrate` with `--replay`. Done; tested on a synthetic whole run, on `rest-table-4g`
+   (rest step) and on `tumble-4g` (holds and fit).
+4. A real run produces the first `board.cal`. Done, 2026-11-14.
+5. Linking: desktop default, then `recognize`. Done.
+
+Open: `recognize` feeding the live IMU into the core with `live_config`.

@@ -8,6 +8,7 @@ use anyhow::Context;
 use clap::{Args, ValueEnum};
 use protocol::Hello;
 
+use crate::calfile::{self, CalFile};
 use crate::calib::{self, Fit, Still};
 use crate::config::Config;
 use crate::recording::{self, Recording, V3};
@@ -15,7 +16,8 @@ use crate::recording::{self, Recording, V3};
 /// How to configure the core, for any stream (`path`, `events`, `strokes`, the viewer).
 #[derive(Debug, Clone, Args)]
 pub struct CoreArgs {
-    /// Tumble session to calibrate the accelerometer with (`calib`).
+    /// Accelerometer calibration: a calibration file (`calibrate`, `.cal`; it also gives
+    /// the initial gyro bias) or a tumble session to fit (`calib`).
     #[arg(long)]
     pub calib: Option<PathBuf>,
     /// Still thresholds: on a table or in the hand.
@@ -69,7 +71,14 @@ pub fn load(p: &Path) -> anyhow::Result<Recording> {
 /// `CoreArgs` with its files read: what is known before the stream's `Hello`.
 #[derive(Debug, Clone, Copy)]
 pub struct Setup {
+    /// From a tumble session.
     pub fit: Option<Fit>,
+    /// A calibration file: accel calibration, and the gyro bias unless a rest session
+    /// was given.
+    pub file: Option<CalFile>,
+    /// The linked `board.cal`, when no `--calib` was given: the default for streams of
+    /// its scales (`docs/calibration.md`).
+    pub linked: Option<CalFile>,
     /// From the rest session, if one was given.
     pub bias_dps: Option<V3>,
     pub hold: Hold,
@@ -77,16 +86,27 @@ pub struct Setup {
 
 impl Setup {
     pub fn load(CoreArgs { calib, hold, bias }: &CoreArgs) -> anyhow::Result<Self> {
-        let fit = calib
-            .as_deref()
-            .map(|c| calib::fit_session(&load(c)?))
-            .transpose()?;
+        let (mut fit, mut file) = (None, None);
+        if let Some(c) = calib {
+            let bytes = fs::read(c).with_context(|| format!("reading {}", c.display()))?;
+            if bytes.starts_with(&calfile::MAGIC) {
+                file = Some(CalFile::parse(&bytes).with_context(|| c.display().to_string())?);
+            } else {
+                fit = Some(calib::fit_session(&recording::load(&bytes)?)?);
+            }
+        }
         let bias_dps = bias
             .as_deref()
             .map(|b| anyhow::Ok(recording::mean(&recording::scaled(&load(b)?)?.gyro)))
             .transpose()?;
+        let linked = match calib {
+            Some(_) => None,
+            None => Some(calfile::board().context("the linked board.cal")?),
+        };
         Ok(Self {
             fit,
+            file,
+            linked,
             bias_dps,
             hold: *hold,
         })
@@ -100,21 +120,43 @@ impl Setup {
         hello: &Hello,
         fallback_bias: impl FnOnce() -> anyhow::Result<(V3, &'static str)>,
     ) -> anyhow::Result<(Config, String)> {
-        let (bias_dps, bias_from) = match self.bias_dps {
-            Some(b) => (b, "rest session"),
-            None => fallback_bias()?,
+        // The linked file is the default where its scales fit; elsewhere the default stays
+        // raw, as before there was a file.
+        let linked = self
+            .linked
+            .filter(|f| f.applies_to(hello.ctrl1_xl, hello.ctrl2_g));
+        let file = self.file.or(linked);
+        let (bias_dps, bias_from) = match (self.bias_dps, file) {
+            (Some(b), _) => (b, "rest session"),
+            // Replaced by the file's below.
+            (None, Some(_)) => ([0.0; 3], "calibration file"),
+            (None, None) => fallback_bias()?,
         };
         let still: Still = match self.hold {
             Hold::Hand => calib::HAND,
             Hold::Table => calib::TABLE,
         };
-        let cfg = Config::new(hello, self.fit.as_ref(), bias_dps, still)?;
+        let mut cfg = Config::new(hello, self.fit.as_ref(), bias_dps, still)?;
+        let mut bias_dps = bias_dps;
+        if let Some(file) = &file {
+            let bias_lsb = cfg.bias_lsb;
+            cfg = cfg.with_file(file)?;
+            if self.bias_dps.is_some() {
+                cfg.bias_lsb = bias_lsb;
+            } else {
+                bias_dps = cfg.bias_dps();
+            }
+        }
         let about = format!(
             "accel {}, gyro bias {:.2} {:.2} {:.2} dps ({bias_from}), {:?} thresholds\n",
-            if self.fit.is_some() {
-                "calibrated"
-            } else {
-                "raw"
+            match (file, self.fit) {
+                (Some(_), _) if self.file.is_some() => "calibrated (file)",
+                (Some(_), _) => "calibrated (linked board.cal)",
+                (None, Some(_)) => "calibrated",
+                (None, None) if self.linked.is_some() => {
+                    "raw (the linked board.cal is for other scales)"
+                }
+                (None, None) => "raw",
             },
             bias_dps[0],
             bias_dps[1],
@@ -138,4 +180,140 @@ pub fn reference_config(
         Ok((median, "this session's median"))
     })?;
     Ok((rec, cfg, about))
+}
+
+#[cfg(test)]
+mod tests {
+    use protocol::{Firmware, ImuStatus};
+
+    use super::*;
+
+    const FILE: CalFile = CalFile {
+        ctrl1_xl: 0x48,
+        ctrl2_g: 0x44,
+        accel_offset_lsb: [-35, 45, 205],
+        accel_gain_q30: [1_083_727_709, 1_072_668_082, 1_068_051_012],
+        gyro_bias_q8: [26_581, -82_990, -3_511],
+    };
+
+    fn hello(ctrl1_xl: u8, ctrl2_g: u8) -> Hello {
+        Hello {
+            fw: Firmware::Stream,
+            imu: ImuStatus::Ok,
+            imu_addr: 0x6B,
+            who_am_i: 0x69,
+            ctrl1_xl,
+            ctrl2_g,
+        }
+    }
+
+    /// `--calib <file.cal>`: the file's integers reach `gc_config` unchanged, with its
+    /// bias unless a rest session gives one; other scales are an error.
+    #[test]
+    fn setup_with_a_calibration_file() {
+        let dir = std::env::temp_dir().join(format!("gesture-reference-{}", std::process::id()));
+        fs::create_dir_all(&dir).expect("dir");
+        let path = dir.join("board.cal");
+        fs::write(&path, FILE.to_bytes()).expect("write");
+        let args = |bias| CoreArgs {
+            calib: Some(path.clone()),
+            hold: Hold::Hand,
+            bias,
+        };
+        let no_fallback = || -> anyhow::Result<(V3, &'static str)> { panic!("not asked") };
+
+        let setup = Setup::load(&args(None)).expect("setup");
+        // Another ODR, the same scales.
+        let (cfg, about) = setup
+            .config(&hello(0x68, 0x54), no_fallback)
+            .expect("config");
+        let gc = cfg.gc();
+        assert_eq!((gc.ctrl1_xl, gc.ctrl2_g), (0x68, 0x54));
+        assert_eq!(
+            CalFile::from_gc(&gc),
+            CalFile {
+                ctrl1_xl: 0x68,
+                ctrl2_g: 0x54,
+                ..FILE
+            }
+        );
+        assert!(about.contains("calibrated (file)") && about.contains("1.82 -5.67 -0.24"));
+        // The thresholds are not the file's business: the hand preset (docs/calibration.md).
+        assert_eq!(
+            (
+                gc.still_gyro_std_lsb,
+                gc.still_accel_std_lsb,
+                gc.still_gyro_rate_lsb
+            ),
+            (171, 123, 229)
+        );
+
+        let err = setup
+            .config(&hello(0x40, 0x40), no_fallback)
+            .expect_err("scales");
+        assert!(err.to_string().contains("calibration file is for"), "{err}");
+
+        let rest = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../../data/sessions/20261030-213745_rest-table-4g.bin");
+        let setup = Setup::load(&args(Some(rest))).expect("setup");
+        let (cfg, about) = setup
+            .config(&hello(0x48, 0x44), no_fallback)
+            .expect("config");
+        let gc = cfg.gc();
+        assert_eq!(gc.accel_gain_q30, FILE.accel_gain_q30);
+        assert_ne!(gc.gyro_bias_q8, FILE.gyro_bias_q8);
+        assert!(about.contains("rest session"), "{about}");
+        fs::remove_dir_all(&dir).expect("cleanup");
+    }
+
+    /// Without `--calib`: the linked `board.cal` where its scales fit, raw elsewhere.
+    #[test]
+    fn linked_file_is_the_default() {
+        let setup = Setup::load(&CoreArgs {
+            calib: None,
+            hold: Hold::Hand,
+            bias: None,
+        })
+        .expect("setup");
+        let board = calfile::board().expect("board.cal");
+        let no_fallback = || -> anyhow::Result<(V3, &'static str)> { panic!("not asked") };
+        let (cfg, about) = setup
+            .config(&hello(0x48, 0x44), no_fallback)
+            .expect("config");
+        assert_eq!(CalFile::from_gc(&cfg.gc()), board);
+        assert!(about.contains("linked board.cal"), "{about}");
+        // The thresholds and limits: the table in docs/calibration.md, which the recognize
+        // firmware carries as constants (`live_config`).
+        let gc = cfg.gc();
+        assert_eq!(
+            (
+                gc.still_gyro_std_lsb,
+                gc.still_accel_std_lsb,
+                gc.still_gyro_rate_lsb
+            ),
+            (171, 123, 229)
+        );
+        assert_eq!(
+            (gc.hold_n, gc.bias_gyro_std_lsb, gc.bias_accel_std_lsb),
+            (20, 11, 16)
+        );
+        assert_eq!((gc.clip_lsb, gc.max_dt_us), (32700, 14423));
+        assert_eq!((gc.min_stroke_us, gc.max_stroke_us), (150_000, 4_000_000));
+        assert_eq!((gc.min_extent_mm, gc.max_v_end_mm_s), (20, 300));
+        assert_eq!((gc.reserved0, gc.reserved1), (0, 0));
+
+        let fallback = || Ok(([1.0, 2.0, 3.0], "fallback"));
+        let (cfg, about) = setup.config(&hello(0x40, 0x40), fallback).expect("config");
+        let gc = cfg.gc();
+        assert_eq!(gc.accel_offset_lsb, [0; 3]);
+        assert_eq!(gc.accel_gain_q30, [1 << 30; 3]);
+        assert!(
+            about.contains("raw (the linked board.cal is for other scales)"),
+            "{about}"
+        );
+        assert!(
+            about.contains("1.00 2.00 3.00") && about.contains("fallback"),
+            "{about}"
+        );
+    }
 }

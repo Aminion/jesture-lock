@@ -6,14 +6,21 @@
 // digest is defined in host/crates/gesture-cli/src/vector.rs). It also times every gc_feed against
 // the sample period and measures the stack peak. The result is in `bench_result`, read over SWD
 // (core/contract/vectors/v1/README.md); the LED blinks slowly on a match, fast otherwise.
+//
+// It also embeds the board's calibration file (docs/calibration.md) and checks it at build
+// time; the config made from it waits for the live IMU feed.
 #include "gesture/board/clock.hpp"
 #include "gesture/board/gpio.hpp"
+#include "gesture/board/lsm6ds3.hpp"
 #include "gesture/core.h"
+#include "gesture/proto/crc16.hpp"
+#include "gesture/proto/le.hpp"
 #include "stm32g0xx.h"
 
 #include <algorithm>
 #include <array>
 #include <bit>
+#include <concepts>
 #include <cstddef>
 #include <cstdint>
 #include <span>
@@ -89,6 +96,104 @@ static_assert(read_at<std::uint32_t>(magic_at) == 0x31564347, "not a GCV1 vector
 static_assert(vector.size() == header_size + (vector_samples * sizeof(gc_sample)),
               "vector size does not match its sample count");
 static_assert(std::endian::native == std::endian::little, "the vector is little-endian");
+
+// --- The board calibration (docs/calibration.md) -----------------------------------
+
+// GESTURE_BOARD_CAL is data/calibration/board.cal, written by `gesture-cli calibrate`. A
+// file that is damaged, or measured at other scales than the driver sets, does not build.
+#ifdef __clang__
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wc23-extensions"
+#endif
+constexpr auto cal = std::to_array<std::uint8_t>({
+#embed GESTURE_BOARD_CAL
+});
+#ifdef __clang__
+#pragma clang diagnostic pop
+#endif
+
+// File layout.
+constexpr std::size_t cal_size = 44;
+constexpr std::size_t cal_version_at = 4;
+constexpr std::size_t cal_ctrl1_xl_at = 5;
+constexpr std::size_t cal_ctrl2_g_at = 6;
+constexpr std::size_t cal_reserved0_at = 7;
+constexpr std::size_t cal_offset_at = 8;
+constexpr std::size_t cal_reserved1_at = 14;
+constexpr std::size_t cal_gain_at = 16;
+constexpr std::size_t cal_bias_at = 28;
+constexpr std::size_t cal_reserved2_at = 40;
+constexpr std::size_t cal_crc_at = 42;
+constexpr std::uint8_t cal_version = 1;
+// The full-scale bits: FS_XL in CTRL1_XL; FS_G and FS_125 in CTRL2_G.
+constexpr std::uint8_t fs_xl_mask = 0x0C;
+constexpr std::uint8_t fs_g_mask = 0x0E;
+// accel_gain_q30 that gc_init accepts: 0.9..1.1 (docs/core.md).
+constexpr std::int32_t gain_q30_min = 966'367'642;
+constexpr std::int32_t gain_q30_max = 1'181'116'006;
+
+static_assert(cal.size() == cal_size, "board.cal: not 44 bytes");
+
+template <std::integral T> constexpr T cal_at(std::size_t at) {
+    return proto::load_le<T>(std::span{cal}.subspan(at).first<sizeof(T)>());
+}
+
+template <std::integral T> constexpr std::array<T, 3> cal_axes(std::size_t at) {
+    return {cal_at<T>(at), cal_at<T>(at + sizeof(T)), cal_at<T>(at + (2 * sizeof(T)))};
+}
+
+constexpr auto cal_offset = cal_axes<std::int16_t>(cal_offset_at);
+constexpr auto cal_gain = cal_axes<std::int32_t>(cal_gain_at);
+constexpr auto cal_bias = cal_axes<std::int32_t>(cal_bias_at);
+
+static_assert(cal_at<std::uint32_t>(0) == 0x4c41'4347, "board.cal: not a GCAL file"); // "GCAL"
+static_assert(cal[cal_version_at] == cal_version, "board.cal: unknown version");
+static_assert(proto::crc16(std::span{cal}.first(cal_crc_at)) == cal_at<std::uint16_t>(cal_crc_at),
+              "board.cal: CRC mismatch");
+static_assert(cal[cal_reserved0_at] == 0 && cal_at<std::uint16_t>(cal_reserved1_at) == 0 &&
+                  cal_at<std::uint16_t>(cal_reserved2_at) == 0,
+              "board.cal: a reserved field is not 0");
+static_assert(std::ranges::all_of(cal_gain,
+                                  [](std::int32_t g) {
+                                      return g >= gain_q30_min && g <= gain_q30_max;
+                                  }),
+              "board.cal: a gain is outside 0.9..1.1");
+static_assert(((cal[cal_ctrl1_xl_at] ^ board::lsm6ds3_ctrl1_xl) & fs_xl_mask) == 0 &&
+                  ((cal[cal_ctrl2_g_at] ^ board::lsm6ds3_ctrl2_g) & fs_g_mask) == 0,
+              "board.cal: measured at other scales than the driver sets");
+
+// The thresholds and limits below are the table in docs/calibration.md: the hand preset
+// in LSB of +-4 g (FS_XL 10) and 500 dps (FS_G 01). Another scale needs other numbers.
+static_assert((board::lsm6ds3_ctrl1_xl & fs_xl_mask) == 0x08 &&
+                  (board::lsm6ds3_ctrl2_g & fs_g_mask) == 0x04,
+              "the still thresholds are for +-4 g and 500 dps");
+
+// The config for the live IMU: the calibration file, the thresholds, the limits. The host
+// builds the same 68 bytes for a stream of this board (session::reference). Not fed to
+// the core yet: recognize does not read the IMU so far.
+[[maybe_unused]] constexpr gc_config live_config{
+    .abi_version = GC_ABI_VERSION,
+    .ctrl1_xl = board::lsm6ds3_ctrl1_xl,
+    .ctrl2_g = board::lsm6ds3_ctrl2_g,
+    .reserved0 = 0,
+    .accel_offset_lsb = {cal_offset[0], cal_offset[1], cal_offset[2]},
+    .reserved1 = 0,
+    .accel_gain_q30 = {cal_gain[0], cal_gain[1], cal_gain[2]},
+    .gyro_bias_q8 = {cal_bias[0], cal_bias[1], cal_bias[2]},
+    .still_gyro_std_lsb = 171,
+    .still_accel_std_lsb = 123,
+    .still_gyro_rate_lsb = 229,
+    .hold_n = 20,
+    .bias_gyro_std_lsb = 11,
+    .bias_accel_std_lsb = 16,
+    .clip_lsb = 32700,
+    .max_dt_us = 14423,
+    .min_stroke_us = 150'000,
+    .max_stroke_us = 4'000'000,
+    .min_extent_mm = 20,
+    .max_v_end_mm_s = 300,
+};
+static_assert(sizeof(gc_config) == 68);
 
 // --- Digest: FNV-1a 32 over the C layouts, as vector.rs ----------------------------
 

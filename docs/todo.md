@@ -297,3 +297,19 @@ which may exceed the 300 ns fast-mode limit; no I2C errors seen so far.
 
 - **I2C RX by DMA.** Only if the CPU must be free during the read; low value after 400 kHz.
 - UART RX stays interrupt-driven: the PC sends little.
+
+## IMU stall: no recovery in `stream`
+
+Seen 2026-11-14 during the calibration runs (`docs/calibration.md`), three times in an hour:
+the `stream` firmware keeps sending `Hello` (`imu` = ok) and `Status`, but no `Sample`.
+`Status` shows one I2C error and no further edges (`i2c_err` 1; `missed` 3 once, 6776 once
+after a 65 s gap that ended with one edge whose read failed; `stuck` 0, so INT1 is low).
+One stall came 106 s into a run, while the board was being turned (that session is not
+kept in the repository). Only an MCU reset brought the samples back; once the reset found no IMU at
+all (`imu` = not found), until the wires were reseated. So the cause is most likely an
+intermittent IMU wire, and the IMU losing its configuration.
+
+Not done: when data-ready edges stop (INT1 low, no edge for some periods), run
+`lsm6ds3_init` again and count it in `Status`. A glitch would then cost one hold, not the
+run. It needs a line in `docs/protocol.md` if a counter is added or `stuck` is reused.
+`gesture-cli calibrate` ends the run after 2 s without samples.

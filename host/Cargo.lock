@@ -1371,6 +1371,7 @@ dependencies = [
  "gesture-core",
  "jiff",
  "protocol",
+ "serialport",
  "session",
 ]
 

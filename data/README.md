@@ -12,3 +12,7 @@ duration, and the stream health from the recording (samples, rate, failures).
 
 The conformance vectors cut from these sessions live with the contract, in
 `core/contract/vectors/v1/` (`gesture-cli vectors`).
+
+`calibration/board.cal`: the board's calibration file, written by `gesture-cli calibrate`
+(`docs/calibration.md`). The run that made it is the `sessions/*_calibrate.bin` of the same
+time; its `.toml` note holds the holds, the gates and the fitted values.

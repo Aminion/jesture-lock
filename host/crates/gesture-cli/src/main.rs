@@ -2,6 +2,7 @@
 //! through the host build of core/, and compare against the recognize firmware's events.
 
 mod calib;
+mod calibrate;
 mod events;
 mod path;
 mod stats;
@@ -104,6 +105,9 @@ enum Command {
         #[arg(long, default_value = "../core/contract/vectors/v1")]
         out: PathBuf,
     },
+    /// Guided calibration of the board (`docs/calibration.md`): rest on the table, then
+    /// holds in free orientations; writes the calibration file and records the run.
+    Calibrate(calibrate::CalibrateArgs),
     Record {
         #[command(flatten)]
         port: PortArgs,
@@ -369,6 +373,7 @@ fn main() -> anyhow::Result<()> {
             Ok(())
         }
         Command::Vectors { data, out } => vector::write_all(&data, &out),
+        Command::Calibrate(args) => calibrate::run(&args),
         Command::Vector {
             reference,
             samples,
