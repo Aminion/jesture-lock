@@ -24,6 +24,12 @@ template <typename T> [[nodiscard]] constexpr T saturating(std::int64_t x) {
     return a >= 0 ? (a + half) / b : -((-a + half) / b);
 }
 
+// |x|. Not std::abs: libstdc++ does not declare its integer overloads constexpr (GCC
+// folds them as builtins, clang rejects them in constant expressions).
+template <typename T> [[nodiscard]] constexpr T iabs(T x) {
+    return x < 0 ? -x : x;
+}
+
 [[nodiscard]] constexpr std::int16_t sat16(std::int64_t x) {
     return saturating<std::int16_t>(x);
 }

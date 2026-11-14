@@ -190,7 +190,7 @@ constexpr void integrate(Stroke& s, const Raw& x, const gc_config& cfg, const Sc
     for (std::size_t i = 0; i < 3; ++i) {
         const std::int32_t g = x.gyro[i];
         const std::int32_t ac = x.accel[i];
-        if ((g < 0 ? -g : g) >= cfg.clip_lsb || (ac < 0 ? -ac : ac) >= cfg.clip_lsb) {
+        if (iabs(g) >= cfg.clip_lsb || iabs(ac) >= cfg.clip_lsb) {
             s.clipped = true;
         }
     }
@@ -207,7 +207,7 @@ constexpr void integrate(Stroke& s, const Raw& x, const gc_config& cfg, const Sc
     const std::uint32_t big_t = s.snap.t - s.t_s0;
     std::int64_t v_max = 0;
     for (const std::int64_t v : s.snap.v) {
-        v_max = std::max(v_max, v < 0 ? -v : v);
+        v_max = std::max(v_max, iabs(v));
     }
     const std::int64_t v_end = rdiv(v_max, 1000000); // mm/s, before saturation
     s.duration_us = big_t;
@@ -244,7 +244,7 @@ constexpr void integrate(Stroke& s, const Raw& x, const gc_config& cfg, const Sc
                 rdiv(rdiv(s.snap.v[i] * t, 1000000) * t, std::int64_t{2} * big_t);
             *xs[i] = sat16(*xs[i] - rdiv(c, 1000000));
             const std::int32_t x = *xs[i];
-            extent = std::max(extent, static_cast<std::uint16_t>(x < 0 ? -x : x));
+            extent = std::max(extent, static_cast<std::uint16_t>(iabs(x)));
         }
     }
     s.extent_mm = extent;

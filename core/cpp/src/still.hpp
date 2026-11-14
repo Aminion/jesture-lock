@@ -61,7 +61,7 @@ constexpr void add(Sums& sums, const std::array<std::int16_t, 3>& x) {
     constexpr std::int64_t n = win_n;
     for (std::size_t i = 0; i < 3; ++i) {
         const std::int64_t d = (256 * g.s[i]) - (n * bias_q8[i]);
-        if ((d < 0 ? -d : d) >= 256 * n * th) {
+        if (iabs(d) >= 256 * n * th) {
             return false;
         }
     }
