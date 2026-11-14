@@ -279,7 +279,7 @@ pub(crate) fn replay_updates(file: &Path, setup: Setup) -> Vec<Update> {
 
 #[cfg(test)]
 mod tests {
-    use gesture_core::{Core, GcSample, Kind, Reject};
+    use gesture_core::{Core, Kind, Reject};
     use session::reference::{CoreArgs, ReferenceArgs, reference_config};
     use session::strokes;
 
@@ -302,11 +302,7 @@ mod tests {
         let mut direct = Core::new(&cfg.gc()).expect("gc_init");
         let (mut samples, mut strokes) = (Vec::new(), Vec::new());
         for (t, s) in &rec.samples {
-            let ev = direct.feed(&GcSample {
-                t_us: s.t_us,
-                gyro: s.gyro,
-                accel: s.accel,
-            });
+            let ev = direct.feed(&recording::gc_sample(s));
             samples.push((*t, ev, direct.live()));
             if ev.kind == Kind::Stroke {
                 strokes.push(direct.stroke().expect("gc_stroke"));

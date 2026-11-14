@@ -20,6 +20,27 @@ pub const MIN_STROKE_US: u64 = 150_000;
 pub const MAX_STROKE_US: u64 = 4_000_000;
 pub const MIN_EXTENT_MM: f64 = 20.0;
 pub const MAX_V_END_MM_S: f64 = 300.0;
+
+/// Scale of `accel_gain_q30` (Q30) and of `gyro_bias_q8` (LSB x 256).
+pub const Q30: f64 = (1u32 << 30) as f64;
+pub const Q8: f64 = 256.0;
+
+/// A `gc_config` with the ABI version and the defaults above that do not depend on the
+/// sensor's scales; the caller fills in the rest.
+pub fn limits() -> GcConfig {
+    GcConfig {
+        abi_version: GC_ABI_VERSION,
+        hold_n: HOLD_N as u16,
+        clip_lsb: CLIP_LSB as u16,
+        max_dt_us: MAX_DT_US as u16,
+        min_stroke_us: MIN_STROKE_US as u32,
+        max_stroke_us: MAX_STROKE_US as u32,
+        min_extent_mm: MIN_EXTENT_MM as u16,
+        max_v_end_mm_s: MAX_V_END_MM_S as u16,
+        ..GcConfig::default()
+    }
+}
+
 /// `gc_config` in the session's LSB, as the caller would fill it.
 #[derive(Debug, Clone, Copy)]
 pub struct Config {
@@ -56,15 +77,14 @@ impl Config {
         // bias), so this reference and the integer core decide on the same numbers.
         let gyro_lsb = |dps: f64| (dps * 1e6 / sg).round();
         let accel_lsb = |mg: f64| (mg * 1e3 / sa).round();
-        let q30 = f64::from(1u32 << 30);
         Ok(Self {
             ctrl1_xl: hello.ctrl1_xl,
             ctrl2_g: hello.ctrl2_g,
             sa,
             sg,
             offset_lsb: fit.map_or([0.0; 3], |f| f.offset.map(|g| (g * 1e6 / sa).round())),
-            gain: fit.map_or([1.0; 3], |f| f.gain.map(|g| (g * q30).round() / q30)),
-            bias_lsb: bias_dps.map(|d| (d * 1e6 / sg * 256.0).round() / 256.0),
+            gain: fit.map_or([1.0; 3], |f| f.gain.map(|g| (g * Q30).round() / Q30)),
+            bias_lsb: bias_dps.map(|d| (d * 1e6 / sg * Q8).round() / Q8),
             still_gyro_std: gyro_lsb(still.gyro_std_dps),
             still_accel_std: accel_lsb(still.accel_std_mg),
             still_gyro_rate: gyro_lsb(still.gyro_mean_dps),
@@ -77,27 +97,17 @@ impl Config {
     pub fn gc(&self) -> GcConfig {
         let lsb = |x: f64| x.round() as u16;
         GcConfig {
-            abi_version: GC_ABI_VERSION,
             ctrl1_xl: self.ctrl1_xl,
             ctrl2_g: self.ctrl2_g,
             accel_offset_lsb: self.offset_lsb.map(|x| x.round() as i16),
-            accel_gain_q30: self
-                .gain
-                .map(|g| (g * f64::from(1u32 << 30)).round() as i32),
-            gyro_bias_q8: self.bias_lsb.map(|b| (b * 256.0).round() as i32),
+            accel_gain_q30: self.gain.map(|g| (g * Q30).round() as i32),
+            gyro_bias_q8: self.bias_lsb.map(|b| (b * Q8).round() as i32),
             still_gyro_std_lsb: lsb(self.still_gyro_std),
             still_accel_std_lsb: lsb(self.still_accel_std),
             still_gyro_rate_lsb: lsb(self.still_gyro_rate),
-            hold_n: HOLD_N as u16,
             bias_gyro_std_lsb: lsb(self.bias_gyro_std),
             bias_accel_std_lsb: lsb(self.bias_accel_std),
-            clip_lsb: CLIP_LSB as u16,
-            max_dt_us: MAX_DT_US as u16,
-            min_stroke_us: MIN_STROKE_US as u32,
-            max_stroke_us: MAX_STROKE_US as u32,
-            min_extent_mm: MIN_EXTENT_MM as u16,
-            max_v_end_mm_s: MAX_V_END_MM_S as u16,
-            ..GcConfig::default()
+            ..limits()
         }
     }
 

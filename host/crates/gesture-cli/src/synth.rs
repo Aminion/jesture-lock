@@ -10,14 +10,14 @@
 use std::path::Path;
 
 use anyhow::Context;
-use gesture_core::ffi::GC_ABI_VERSION;
 use gesture_core::{Core, Event, GcConfig, GcSample, Kind, Reject, Stroke};
 use protocol::{Firmware, Hello, ImuStatus};
+use session::calib;
+use session::config::{self, BIAS_ACCEL_STD_MG, BIAS_GYRO_STD_DPS, Q8, Q30};
+use session::recording::G;
 
 use crate::vector;
 
-/// m/s^2 per g, as in docs/core.md.
-const G: f64 = 9.80665;
 /// The board's measured sample period (104 Hz nominal).
 const DT_US: u32 = 9600;
 /// `GC_GUARD_N`, docs/core.md "Fixed constants" (not in `core.h`): the stroke starts this
@@ -114,37 +114,29 @@ impl Sensor {
     }
 
     fn gain_q30(self) -> [i32; 3] {
-        self.gain
-            .map(|g| (g * f64::from(1u32 << 30)).round() as i32)
+        self.gain.map(|g| (g * Q30).round() as i32)
     }
 
-    /// The hand defaults of docs/todo.md, in physical units, at this sensor's scales.
+    /// The hand defaults (`calib::HAND`, `config::limits`) at this sensor's scales.
     fn config(self) -> GcConfig {
         let (sa, sg) = (self.sa(), self.sg());
         let dps = |x: f64| ((x * 1e6 / sg).round() as u16).max(1);
         let mg = |x: f64| ((x * 1e3 / sa).round() as u16).max(1);
+        let hand = calib::HAND;
         GcConfig {
-            abi_version: GC_ABI_VERSION,
             ctrl1_xl: self.ctrl1_xl,
             ctrl2_g: self.ctrl2_g,
             accel_offset_lsb: self.offset_lsb,
             accel_gain_q30: self.gain_q30(),
             gyro_bias_q8: self
                 .initial_bias_dps
-                .map(|b| (b * 1e6 / sg * 256.0).round() as i32),
-            still_gyro_std_lsb: dps(3.0),
-            still_accel_std_lsb: mg(15.0),
-            still_gyro_rate_lsb: dps(4.0),
-            hold_n: 20,
-            bias_gyro_std_lsb: dps(0.2),
-            bias_accel_std_lsb: mg(2.0),
-            clip_lsb: 32700,
-            max_dt_us: 14423,
-            min_stroke_us: 150_000,
-            max_stroke_us: 4_000_000,
-            min_extent_mm: 20,
-            max_v_end_mm_s: 300,
-            ..GcConfig::default()
+                .map(|b| (b * 1e6 / sg * Q8).round() as i32),
+            still_gyro_std_lsb: dps(hand.gyro_std_dps),
+            still_accel_std_lsb: mg(hand.accel_std_mg),
+            still_gyro_rate_lsb: dps(hand.gyro_mean_dps),
+            bias_gyro_std_lsb: dps(BIAS_GYRO_STD_DPS),
+            bias_accel_std_lsb: mg(BIAS_ACCEL_STD_MG),
+            ..config::limits()
         }
     }
 }

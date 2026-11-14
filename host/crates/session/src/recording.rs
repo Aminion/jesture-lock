@@ -2,6 +2,7 @@
 //! the same in physical units (for reading only; `core/` works in raw LSB).
 
 use anyhow::{Context, bail};
+use gesture_core::GcSample;
 use protocol::time::{self, Unwrapper};
 use protocol::{Deframer, Hello, Message, Sample};
 
@@ -41,6 +42,15 @@ pub fn load(bytes: &[u8]) -> anyhow::Result<Recording> {
     }
     let hello = hello.context("no Hello in the file")?;
     Ok(Recording { hello, samples })
+}
+
+/// A wire `Sample` as the core takes it (`gc_sample` is its fields).
+pub fn gc_sample(s: &Sample) -> GcSample {
+    GcSample {
+        t_us: s.t_us,
+        gyro: s.gyro,
+        accel: s.accel,
+    }
 }
 
 pub type V3 = [f64; 3];

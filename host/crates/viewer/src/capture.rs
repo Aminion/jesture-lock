@@ -3,7 +3,7 @@
 
 use egui::{Align2, Color32, FontId, Pos2, Response, Sense, Ui, pos2, vec2};
 use gesture_core::{Event, GcPoint, Kind, Reject, Stroke};
-use session::strokes::Summary;
+use session::strokes::{Summary, mm};
 
 use crate::app::BLUE;
 use crate::scene::{self, Camera, Level, Preset, V3};
@@ -32,10 +32,6 @@ pub struct Capture {
     shots: Vec<Shot>,
     /// Shots before this were cleared from the view.
     shown_from: usize,
-}
-
-fn mm(p: &GcPoint) -> V3 {
-    [p.x_mm, p.y_mm, p.z_mm].map(f64::from)
 }
 
 impl Capture {

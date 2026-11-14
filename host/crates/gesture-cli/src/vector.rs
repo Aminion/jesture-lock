@@ -28,7 +28,7 @@ use anyhow::{Context, ensure};
 use gesture_core::ffi::GcEvent;
 use gesture_core::{Core, GcConfig, GcPoint, GcSample, GcStrokeInfo, Kind, Stroke};
 
-use session::recording::Recording;
+use session::recording::{Recording, gc_sample};
 
 pub const MAGIC: [u8; 4] = *b"GCV1";
 const HEADER: usize = 84;
@@ -257,14 +257,7 @@ pub fn build(rec: &Recording, cfg: &GcConfig, n: usize) -> anyhow::Result<Vec<u8
         "the session has {} samples, asked for {n}",
         rec.samples.len()
     );
-    let samples: Vec<GcSample> = rec.samples[..n]
-        .iter()
-        .map(|(_, s)| GcSample {
-            t_us: s.t_us,
-            gyro: s.gyro,
-            accel: s.accel,
-        })
-        .collect();
+    let samples: Vec<GcSample> = rec.samples[..n].iter().map(|(_, s)| gc_sample(s)).collect();
     encode(cfg, &samples)
 }
 

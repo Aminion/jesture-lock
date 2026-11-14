@@ -5,7 +5,7 @@ use gesture_core::{Core, Event, GcPoint, Kind};
 use protocol::time::Unwrapper;
 use protocol::{FrameError, Hello, Message};
 use session::check::{self, Stats};
-use session::recording::V3;
+use session::recording::{V3, gc_sample};
 use session::reference::Setup;
 use session::strokes::Summary;
 
@@ -107,11 +107,7 @@ impl Feed {
             return;
         };
         let t_us = self.clock.extend(s.t_us);
-        let event = core.feed(&gesture_core::GcSample {
-            t_us: s.t_us,
-            gyro: s.gyro,
-            accel: s.accel,
-        });
+        let event = core.feed(&gc_sample(s));
         out.push(Update::Sample {
             t_us,
             event,

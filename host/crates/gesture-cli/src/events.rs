@@ -5,9 +5,9 @@
 use std::fmt::Write as _;
 
 use anyhow::{Context, bail};
-use gesture_core::{Core, Event, GcConfig, GcSample};
+use gesture_core::{Core, Event, GcConfig};
 
-use session::recording::Recording;
+use session::recording::{Recording, gc_sample};
 
 /// The events of a recording: (sample index, event), `Kind::None` left out.
 pub fn run(rec: &Recording, cfg: &GcConfig) -> anyhow::Result<Vec<(usize, Event)>> {
@@ -17,11 +17,7 @@ pub fn run(rec: &Recording, cfg: &GcConfig) -> anyhow::Result<Vec<(usize, Event)
         .iter()
         .enumerate()
         .filter_map(|(k, (_, s))| {
-            let ev = core.feed(&GcSample {
-                t_us: s.t_us,
-                gyro: s.gyro,
-                accel: s.accel,
-            });
+            let ev = core.feed(&gc_sample(s));
             (!ev.is_none()).then_some((k, ev))
         })
         .collect())
@@ -44,7 +40,7 @@ pub fn report(rec: &Recording, cfg: &GcConfig) -> anyhow::Result<String> {
 mod tests {
     use std::path::Path;
 
-    use gesture_core::{GcPoint, Kind, Reject};
+    use gesture_core::{GcPoint, GcSample, Kind, Reject};
 
     use super::*;
     use crate::path;

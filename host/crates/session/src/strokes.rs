@@ -4,9 +4,9 @@
 //! (`v_end_mm_s`). Printed by `gesture-cli strokes`, shown by the viewer.
 
 use anyhow::Context;
-use gesture_core::{Core, Event, GcConfig, GcPoint, GcSample, Kind, Stroke};
+use gesture_core::{Core, Event, GcConfig, GcPoint, Kind, Stroke};
 
-use crate::recording::Recording;
+use crate::recording::{Recording, V3, gc_sample, norm};
 
 /// One accepted stroke, summed up from `gc_stroke`.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -26,12 +26,9 @@ pub struct Summary {
     pub step: u16,
 }
 
-fn mm(p: &GcPoint) -> [f64; 3] {
+/// A point's coordinates, mm.
+pub fn mm(p: &GcPoint) -> V3 {
     [p.x_mm, p.y_mm, p.z_mm].map(f64::from)
-}
-
-fn norm(v: [f64; 3]) -> f64 {
-    v.iter().map(|x| x * x).sum::<f64>().sqrt()
 }
 
 impl Summary {
@@ -71,11 +68,7 @@ pub fn run(
     let mut core = Core::new(cfg).with_context(|| format!("config {cfg:?}"))?;
     let mut out = Vec::new();
     for (k, (_, s)) in rec.samples.iter().enumerate() {
-        let ev = core.feed(&GcSample {
-            t_us: s.t_us,
-            gyro: s.gyro,
-            accel: s.accel,
-        });
+        let ev = core.feed(&gc_sample(s));
         match ev.kind {
             Kind::Stroke => {
                 let stroke = core.stroke().context("gc_stroke after STROKE")?;
