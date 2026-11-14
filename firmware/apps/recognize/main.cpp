@@ -116,9 +116,7 @@ constexpr std::uint32_t paint = 0xa5a5'a5a5;
 constexpr std::uintptr_t paint_margin = 64;
 
 std::uintptr_t stack_pointer() {
-    std::uintptr_t sp = 0;
-    asm volatile("mov %0, sp" : "=r"(sp));
-    return sp;
+    return __get_MSP(); // thread mode runs on MSP: nothing switches to PSP
 }
 
 std::span<volatile std::uint32_t> free_ram(std::uintptr_t top) {
