@@ -14,6 +14,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <span>
 #include <utility>
 
 namespace gcore {
@@ -154,9 +155,30 @@ constexpr void integrate(Stroke& s, const Raw& x, const gc_config& cfg, const Sc
     store(s);
 }
 
+// Zero-velocity correction. The board is at rest at the end (time big_t since s0), so the
+// velocity v_end left there is error. Taken as a constant acceleration error v_end / T, it
+// has moved a point at time t by c = v_end * t^2 / (2 T); subtract that, per axis. Returns
+// the extent of the corrected points: their largest |coordinate|, mm.
+[[nodiscard]] constexpr std::uint16_t
+correct_drift(std::span<gc_point> points, const Vec3<NanometersPerS>& v_end, Micros big_t) {
+    std::uint16_t extent = 0;
+    for (gc_point& pt : points) {
+        const std::int64_t t = us(PointTicks{pt.t_100us});
+        const std::array<std::int16_t*, 3> xs{&pt.x_mm, &pt.y_mm, &pt.z_mm};
+        for (std::size_t i = 0; i < 3; ++i) {
+            const Nanometers c{
+                rdiv(scaled(v_end[i].in<NanometersPerS>() * t, nm_s_us_to_nm) * t, 2 * us(big_t))};
+            *xs[i] = sat16(*xs[i] - round_to<Millimeters>(c).in<Millimeters>());
+            const std::int32_t x = *xs[i];
+            extent = std::max(extent, static_cast<std::uint16_t>(iabs(x)));
+        }
+    }
+    return extent;
+}
+
 // End at the snapshot: the checks that need no points (CLIPPED, SHORT by duration, DRIFT),
-// then cut the points back to the snapshot, append it, remove the leftover velocity
-// (zero-velocity correction) and check the extent. Returns 0 (a stroke) or GC_REJ_*.
+// then cut the points back to the snapshot, append it, correct_drift, and check the
+// extent. Returns 0 (a stroke) or GC_REJ_*.
 // DRIFT before the correction bounds v_end there (docs/core.md "Ranges").
 [[nodiscard]] constexpr std::uint8_t finish(Stroke& s, const gc_config& cfg) {
     const Micros big_t = s.snap.t - s.t_s0;
@@ -189,21 +211,7 @@ constexpr void integrate(Stroke& s, const Raw& x, const gc_config& cfg, const Sc
     s.points[s.n] = point(s.snap.p, big_t);
     ++s.n;
 
-    // c = v_end * t^2 / (2 T): the drift a constant leftover acceleration leaves.
-    std::uint16_t extent = 0;
-    for (std::size_t k = 0; k < s.n; ++k) {
-        gc_point& pt = s.points[k];
-        const std::int64_t t = us(PointTicks{pt.t_100us});
-        std::array<std::int16_t*, 3> xs{&pt.x_mm, &pt.y_mm, &pt.z_mm};
-        for (std::size_t i = 0; i < 3; ++i) {
-            const Nanometers c{rdiv(scaled(s.snap.v[i].in<NanometersPerS>() * t, nm_s_us_to_nm) * t,
-                                    2 * us(big_t))};
-            *xs[i] = sat16(*xs[i] - round_to<Millimeters>(c).in<Millimeters>());
-            const std::int32_t x = *xs[i];
-            extent = std::max(extent, static_cast<std::uint16_t>(iabs(x)));
-        }
-    }
-    s.extent_mm = extent;
+    s.extent_mm = correct_drift(std::span{s.points}.first(s.n), s.snap.v, big_t);
     if (s.extent_mm < cfg.min_extent_mm) {
         return GC_REJ_SHORT;
     }

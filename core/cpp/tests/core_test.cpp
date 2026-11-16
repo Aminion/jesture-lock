@@ -481,6 +481,17 @@ static_assert([] {
 
 // --- stroke end ------------------------------------------------------------------------
 
+// correct_drift: 100 mm/s left on x after T = 1 s takes c = v t^2 / (2 T) off each point
+// (12.5 mm rounds to 13 at 0.5 s, 50 mm at 1 s), nothing at t = 0, and reports the extent.
+static_assert([] {
+    std::array<gc_point, 3> pts{{{.x_mm = 0, .y_mm = 0, .z_mm = 5, .t_100us = 0},
+                                 {.x_mm = 100, .y_mm = 0, .z_mm = 5, .t_100us = 5000},
+                                 {.x_mm = 200, .y_mm = 0, .z_mm = 5, .t_100us = 10000}}};
+    const auto v = vec3<gcore::NanometersPerS>({100000000, 0, 0});
+    const std::uint16_t extent = gcore::correct_drift(pts, v, gcore::Micros{1000000});
+    return pts[0].x_mm == 0 && pts[1].x_mm == 87 && pts[2].x_mm == 150 && pts[2].z_mm == 5 &&
+           extent == 150;
+}());
 // Points at 0, 0.5, 1 and 1.5 s (x 0, 100, 200, 300 mm); the snapshot at 1 s with
 // p = 200 mm and a leftover 100 mm/s on x.
 constexpr gcore::Stroke ended(std::uint32_t t_s0 = 1000) {
