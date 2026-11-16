@@ -4,6 +4,7 @@
 // Indexed by age (0 = newest), so the replay and the windows never see the wrap.
 
 #include "config.hpp"
+#include "units.hpp"
 
 #include <array>
 #include <cstddef>
@@ -12,7 +13,7 @@
 namespace gcore {
 
 struct Raw {
-    std::uint16_t dt; // us; <= max_dt_us after the gap check, 0 for the sample after a gap
+    MicrosStep dt; // <= max_dt_us after the gap check, 0 for the sample after a gap
     std::array<std::int16_t, 3> gyro;
     std::array<std::int16_t, 3> accel;
 };

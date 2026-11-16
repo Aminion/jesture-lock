@@ -6,8 +6,10 @@
 #include "state.hpp"
 #include "still.hpp"
 #include "stroke.hpp"
+#include "units.hpp"
 
 #include <algorithm>
+#include <chrono>
 #include <cstdint>
 #include <iterator>
 #include <new>
@@ -38,7 +40,7 @@ gc_event rejected(std::uint8_t reason) {
 // MOVING, after integrating this sample: too long, or the end hold (snapshot, end).
 gc_event moving(gcore::State& st) {
     gcore::Stroke& k = st.stroke;
-    if (k.t - k.t_s0 > st.cfg.max_stroke_us) {
+    if (k.t - k.t_s0 > gcore::Micros{st.cfg.max_stroke_us}) {
         st.mode = GC_ST_WARMUP;
         return rejected(GC_REJ_LONG);
     }
@@ -58,7 +60,7 @@ gc_event moving(gcore::State& st) {
             ev.points = k.n;
         }
         ev.v_end_mm_s = k.v_end_mm_s;
-        ev.duration_us = k.duration_us;
+        ev.duration_us = k.duration.count();
     }
     return ev;
 }
@@ -70,10 +72,12 @@ extern "C" gc_event gc_feed(gc_state* s, const gc_sample* in) {
     gc_event ev{};
 
     // 1. Time. Unsigned subtraction: the MCU clock wraps.
-    const std::uint32_t dt = in->t_us - st.t_prev;
-    const bool gap = !st.fed || dt == 0 || dt > st.cfg.max_dt_us;
+    const gcore::Micros t{in->t_us};
+    const gcore::Micros dt = t - st.t_prev;
+    const bool gap =
+        !st.fed || dt == gcore::Micros::zero() || dt > gcore::MicrosStep{st.cfg.max_dt_us};
     st.fed = true;
-    st.t_prev = in->t_us;
+    st.t_prev = t;
     if (gap) {
         gcore::clear(st.ring);
         st.streak = 0;
@@ -85,7 +89,7 @@ extern "C" gc_event gc_feed(gc_state* s, const gc_sample* in) {
 
     // 2. Ring. After a gap dt is not a step; nothing reads it (the replay needs a hold).
     gcore::Raw raw{};
-    raw.dt = gap ? std::uint16_t{0} : static_cast<std::uint16_t>(dt);
+    raw.dt = gap ? gcore::MicrosStep::zero() : std::chrono::duration_cast<gcore::MicrosStep>(dt);
     std::ranges::copy(in->gyro, raw.gyro.begin());
     std::ranges::copy(in->accel, raw.accel.begin());
     gcore::push(st.ring, raw);
@@ -111,13 +115,13 @@ extern "C" gc_event gc_feed(gc_state* s, const gc_sample* in) {
         break;
     case GC_ST_STILL:
         if (!quiet) {
-            gcore::start(st.stroke, st.ring, st.cfg, st.sc, st.bias_q8, in->t_us);
+            gcore::start(st.stroke, st.ring, st.cfg, st.sc, st.bias_q8, t);
             st.mode = GC_ST_MOVING;
             ev.kind = GC_EV_MOVING;
         }
         break;
     default: // GC_ST_MOVING
-        gcore::integrate(st.stroke, gcore::at(st.ring, 0), st.cfg, st.sc, in->t_us);
+        gcore::integrate(st.stroke, gcore::at(st.ring, 0), st.cfg, st.sc, t);
         ev = moving(st);
         break;
     }
@@ -132,7 +136,7 @@ extern "C" std::uint16_t gc_stroke(const gc_state* s, gc_stroke_info* info, gc_p
     if (gcore::state(s).mode == GC_ST_MOVING || !k.done) {
         return 0;
     }
-    info->duration_us = k.duration_us;
+    info->duration_us = k.duration.count();
     info->points = k.n;
     info->v_end_mm_s = k.v_end_mm_s;
     std::ranges::copy(k.gravity_ug, std::begin(info->gravity_ug));

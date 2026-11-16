@@ -3,6 +3,7 @@
 // docs/core.md: "Scales", "Fixed constants" and gc_init's validation of gc_config.
 
 #include "gesture/core.h"
+#include "units.hpp"
 
 #include <array>
 #include <cstdint>
@@ -48,8 +49,9 @@ inline constexpr std::int32_t gain_max_q30 = 1181116006;
 static_assert(10LL * gain_min_q30 >= 9LL << 30 && 10LL * (gain_min_q30 - 1) < 9LL << 30);
 static_assert(10LL * gain_max_q30 <= 11LL << 30 && 10LL * (gain_max_q30 + 1) > 11LL << 30);
 
-inline constexpr std::uint16_t max_dt_limit_us = 20000;       // "Ranges" assume dt <= 20 ms
-inline constexpr std::uint32_t max_stroke_limit_us = 6553500; // t_100us is uint16
+inline constexpr MicrosStep max_dt_limit{20000};             // "Ranges" assume dt <= 20 ms
+inline constexpr Micros max_stroke_limit{PointTicks::max()}; // a point's time is uint16
+static_assert(max_stroke_limit.count() == 6553500);
 
 // gc_status for cfg, checked in the order of the gc_status table (docs/core.md).
 [[nodiscard]] constexpr gc_status validate(const gc_config& cfg) {
@@ -68,12 +70,14 @@ inline constexpr std::uint32_t max_stroke_limit_us = 6553500; // t_100us is uint
             return GC_ERR_CONFIG;
         }
     }
+    const MicrosStep max_dt{cfg.max_dt_us};
+    const Micros min_stroke{cfg.min_stroke_us};
+    const Micros max_stroke{cfg.max_stroke_us};
     const bool ok = cfg.still_gyro_std_lsb >= 1 && cfg.still_accel_std_lsb >= 1 &&
                     cfg.still_gyro_rate_lsb >= 1 && cfg.hold_n >= guard_n + 1 &&
                     cfg.bias_gyro_std_lsb >= 1 && cfg.bias_accel_std_lsb >= 1 &&
-                    cfg.clip_lsb >= 1 && cfg.max_dt_us >= 1 && cfg.max_dt_us <= max_dt_limit_us &&
-                    cfg.min_stroke_us < cfg.max_stroke_us &&
-                    cfg.max_stroke_us <= max_stroke_limit_us;
+                    cfg.clip_lsb >= 1 && max_dt > MicrosStep::zero() && max_dt <= max_dt_limit &&
+                    min_stroke < max_stroke && max_stroke <= max_stroke_limit;
     return ok ? GC_OK : GC_ERR_CONFIG;
 }
 

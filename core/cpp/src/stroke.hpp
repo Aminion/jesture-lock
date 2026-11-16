@@ -8,6 +8,7 @@
 #include "gesture/core.h"
 #include "quat.hpp"
 #include "ring.hpp"
+#include "units.hpp"
 
 #include <algorithm>
 #include <array>
@@ -21,7 +22,7 @@ namespace gcore {
 struct Snap {
     std::array<std::int64_t, 3> v; // nm/s
     std::array<std::int64_t, 3> p; // nm
-    std::uint32_t t;               // t_us
+    Micros t;                      // stamp
     bool clipped;
 };
 
@@ -31,8 +32,8 @@ struct Stroke {
     Quat q;                                 // start frame <- board frame
     std::array<std::int64_t, 3> v;          // nm/s, start frame
     std::array<std::int64_t, 3> p;          // nm, start frame
-    std::uint32_t t_s0;                     // t_us of the start sample
-    std::uint32_t t;                        // t_us of the newest integrated sample
+    Micros t_s0;                            // stamp of the start sample
+    Micros t;                               // stamp of the newest integrated sample
     std::uint32_t c;                        // samples integrated since s0
     std::uint32_t step;                     // samples per stored point (point i: c = i * step)
     std::uint8_t n;                         // points stored
@@ -40,9 +41,9 @@ struct Stroke {
     bool snapped;                           // snap is valid
     bool done;                              // ended as GC_EV_STROKE: gc_stroke reads it
     Snap snap;
-    std::uint32_t duration_us; // after the end: t_snap - t_s0
-    std::uint16_t v_end_mm_s;  // after the end
-    std::uint16_t extent_mm;   // after the end
+    Micros duration;          // after the end: t_snap - t_s0
+    std::uint16_t v_end_mm_s; // after the end
+    std::uint16_t extent_mm;  // after the end
     std::array<gc_point, points_n> points;
 };
 
@@ -70,11 +71,11 @@ struct Stroke {
 // ang_udeg = w * sg * dt / (256 * 10^6), h = ang_udeg * pi / 360 * 2^30 with pi = 355/113.
 [[nodiscard]] constexpr std::array<std::int64_t, 3>
 half_angle(const std::array<std::int16_t, 3>& gyro, const std::array<std::int32_t, 3>& bias_q8,
-           std::int32_t sg, std::uint16_t dt) {
+           std::int32_t sg, MicrosStep dt) {
     std::array<std::int64_t, 3> h{};
     for (std::size_t i = 0; i < 3; ++i) {
         const std::int64_t w = (std::int64_t{256} * gyro[i]) - bias_q8[i];
-        const std::int64_t ang_udeg = rdiv(w * sg * dt, std::int64_t{256} * 1000000);
+        const std::int64_t ang_udeg = rdiv(w * sg * us(dt), std::int64_t{256} * 1000000);
         h[i] = rdiv(ang_udeg * 355 * (std::int64_t{1} << 23), std::int64_t{113} * 2812500);
     }
     return h;
@@ -91,12 +92,12 @@ accel_ug(const std::array<std::int16_t, 3>& accel, const gc_config& cfg, std::in
     return a;
 }
 
-// p (nm) at t (us since s0) as a point; stored points and gc_live share it.
-[[nodiscard]] constexpr gc_point point(const std::array<std::int64_t, 3>& p, std::uint32_t t) {
+// p (nm) at t (since s0) as a point; stored points and gc_live share it.
+[[nodiscard]] constexpr gc_point point(const std::array<std::int64_t, 3>& p, Micros t) {
     return gc_point{.x_mm = sat16(rdiv(p[0], 1000000)),
                     .y_mm = sat16(rdiv(p[1], 1000000)),
                     .z_mm = sat16(rdiv(p[2], 1000000)),
-                    .t_100us = satu16(rdiv(t, 100))};
+                    .t_100us = point_ticks(t).count()};
 }
 
 // A full buffer keeps points 0, 2, 4, ... and doubles step.
@@ -126,15 +127,15 @@ constexpr void store(Stroke& s) {
 // One sample x at time t: turn, rotate the accel into the start frame, remove gravity,
 // integrate twice, store a point every step samples.
 constexpr void integrate(Stroke& s, const Raw& x, const gc_config& cfg, const Scales& sc,
-                         std::uint32_t t) {
+                         Micros t) {
     s.q = renormalize(turn(s.q, half_angle(x.gyro, s.bias_q8, sc.sg, x.dt)));
     const Mat3 r = rotation(s.q);
     const std::array<std::int64_t, 3> a = accel_ug(x.accel, cfg, sc.sa);
     for (std::size_t i = 0; i < 3; ++i) {
         const std::int64_t f =
             rdiv((r[i][0] * a[0]) + (r[i][1] * a[1]) + (r[i][2] * a[2]), one_q30);
-        s.v[i] += rdiv((f - s.gravity_ug[i]) * x.dt * 980665, 100000000);
-        s.p[i] += rdiv(s.v[i] * x.dt, 1000000);
+        s.v[i] += rdiv((f - s.gravity_ug[i]) * us(x.dt) * 980665, 100000000);
+        s.p[i] += rdiv(s.v[i] * us(x.dt), 1000000);
     }
     for (std::size_t i = 0; i < 3; ++i) {
         const std::int32_t g = x.gyro[i];
@@ -153,26 +154,26 @@ constexpr void integrate(Stroke& s, const Raw& x, const gc_config& cfg, const Sc
 // (zero-velocity correction) and check the extent. Returns 0 (a stroke) or GC_REJ_*.
 // DRIFT before the correction bounds v_end there (docs/core.md "Ranges").
 [[nodiscard]] constexpr std::uint8_t finish(Stroke& s, const gc_config& cfg) {
-    const std::uint32_t big_t = s.snap.t - s.t_s0;
+    const Micros big_t = s.snap.t - s.t_s0;
     std::int64_t v_max = 0;
     for (const std::int64_t v : s.snap.v) {
         v_max = std::max(v_max, iabs(v));
     }
     const std::int64_t v_end = rdiv(v_max, 1000000); // mm/s, before saturation
-    s.duration_us = big_t;
+    s.duration = big_t;
     s.v_end_mm_s = satu16(v_end);
 
     if (s.snap.clipped) {
         return GC_REJ_CLIPPED;
     }
-    if (big_t < cfg.min_stroke_us) {
+    if (big_t < Micros{cfg.min_stroke_us}) {
         return GC_REJ_SHORT;
     }
     if (std::cmp_greater(v_end, cfg.max_v_end_mm_s)) {
         return GC_REJ_DRIFT;
     }
 
-    const std::int64_t t_end = rdiv(big_t, 100);
+    const std::int64_t t_end = rdiv(us(big_t), us(PointTicks{1})); // in point ticks
     while (s.n > 0 && std::cmp_greater(s.points[s.n - 1].t_100us, t_end)) {
         --s.n;
     }
@@ -186,11 +187,10 @@ constexpr void integrate(Stroke& s, const Raw& x, const gc_config& cfg, const Sc
     std::uint16_t extent = 0;
     for (std::size_t k = 0; k < s.n; ++k) {
         gc_point& pt = s.points[k];
-        const std::int64_t t = std::int64_t{100} * pt.t_100us;
+        const std::int64_t t = us(PointTicks{pt.t_100us});
         std::array<std::int16_t*, 3> xs{&pt.x_mm, &pt.y_mm, &pt.z_mm};
         for (std::size_t i = 0; i < 3; ++i) {
-            const std::int64_t c =
-                rdiv(rdiv(s.snap.v[i] * t, 1000000) * t, std::int64_t{2} * big_t);
+            const std::int64_t c = rdiv(rdiv(s.snap.v[i] * t, 1000000) * t, 2 * us(big_t));
             *xs[i] = sat16(*xs[i] - rdiv(c, 1000000));
             const std::int32_t x = *xs[i];
             extent = std::max(extent, static_cast<std::uint16_t>(iabs(x)));
@@ -205,9 +205,9 @@ constexpr void integrate(Stroke& s, const Raw& x, const gc_config& cfg, const Sc
 }
 
 // At sample k, the first non-quiet window after a hold (streak >= hold_n >= guard_n + 1,
-// so the ring holds ages 0 .. guard_n + grav_n). t_k: t_us of sample k.
+// so the ring holds ages 0 .. guard_n + grav_n). t_k: the stamp of sample k.
 constexpr void start(Stroke& s, const Ring& r, const gc_config& cfg, const Scales& sc,
-                     const std::array<std::int32_t, 3>& bias_q8, std::uint32_t t_k) {
+                     const std::array<std::int32_t, 3>& bias_q8, Micros t_k) {
     s = Stroke{};
     s.bias_q8 = bias_q8;
     s.gravity_ug = gravity_ug(r, cfg, sc.sa);
@@ -215,7 +215,7 @@ constexpr void start(Stroke& s, const Ring& r, const gc_config& cfg, const Scale
     s.step = 1;
     s.n = 1; // point 0: (0, 0, 0) at t 0
     // s0 is guard_n + 1 steps back; unsigned, so the clock may wrap in between.
-    std::uint32_t t = t_k;
+    Micros t = t_k;
     for (int age = 0; age <= guard_n; ++age) {
         t -= at(r, age).dt;
     }

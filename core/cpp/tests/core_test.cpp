@@ -150,7 +150,7 @@ static_assert(validate_with([](gc_config& c) {
 // --- ring ---------------------------------------------------------------------------
 
 constexpr gcore::Raw raw_dt(std::uint16_t dt) {
-    return gcore::Raw{.dt = dt, .gyro = {}, .accel = {}};
+    return gcore::Raw{.dt = gcore::MicrosStep{dt}, .gyro = {}, .accel = {}};
 }
 
 // Pushes 1, 2, ..., n as dt.
@@ -163,18 +163,18 @@ constexpr gcore::Ring ring_of(int n) {
 }
 
 static_assert(ring_of(0).count == 0);
-static_assert(ring_of(3).count == 3 && gcore::at(ring_of(3), 0).dt == 3 &&
-              gcore::at(ring_of(3), 2).dt == 1);
+static_assert(ring_of(3).count == 3 && gcore::at(ring_of(3), 0).dt.count() == 3 &&
+              gcore::at(ring_of(3), 2).dt.count() == 1);
 static_assert(ring_of(gcore::ring_n).count == gcore::ring_n &&
-              gcore::at(ring_of(gcore::ring_n), gcore::ring_n - 1).dt == 1);
+              gcore::at(ring_of(gcore::ring_n), gcore::ring_n - 1).dt.count() == 1);
 // Past full: the oldest drop out, the count stays.
-static_assert(ring_of(100).count == gcore::ring_n && gcore::at(ring_of(100), 0).dt == 100 &&
-              gcore::at(ring_of(100), gcore::ring_n - 1).dt == 100 - gcore::ring_n + 1);
+static_assert(ring_of(100).count == gcore::ring_n && gcore::at(ring_of(100), 0).dt.count() == 100 &&
+              gcore::at(ring_of(100), gcore::ring_n - 1).dt.count() == 100 - gcore::ring_n + 1);
 static_assert([] {
     gcore::Ring r = ring_of(60);
     gcore::clear(r);
     gcore::push(r, raw_dt(7));
-    return r.count == 1 && gcore::at(r, 0).dt == 7;
+    return r.count == 1 && gcore::at(r, 0).dt.count() == 7;
 }());
 
 // --- still window ---------------------------------------------------------------------
@@ -184,7 +184,8 @@ constexpr gcore::Ring alternating(std::int16_t a, std::int16_t b) {
     gcore::Ring r{};
     for (int i = 0; i < gcore::win_n; ++i) {
         const std::int16_t x = i % 2 == 0 ? a : b;
-        gcore::push(r, gcore::Raw{.dt = 1, .gyro = {x, x, x}, .accel = {x, x, x}});
+        gcore::push(r,
+                    gcore::Raw{.dt = gcore::MicrosStep{1}, .gyro = {x, x, x}, .accel = {x, x, x}});
     }
     return r;
 }
@@ -281,13 +282,13 @@ constexpr gcore::Quat identity{gcore::one_q30, 0, 0, 0};
 constexpr gcore::Scales scales_4g_500dps = gcore::scales(valid_config()); // 122, 17500
 
 // About 100 dps (5714 LSB at 500 dps) for 10 ms: 999950 udeg, half of it in Q30 rad.
-static_assert(gcore::half_angle({0, 0, 5714}, {0, 0, 0}, 17500, 10000) ==
+static_assert(gcore::half_angle({0, 0, 5714}, {0, 0, 0}, 17500, gcore::MicrosStep{10000}) ==
               std::array<std::int64_t, 3>{0, 0, 9369697});
 // The bias comes off first (100 / 256 LSB): 959885.75 udeg rounds up.
-static_assert(gcore::half_angle({5714, 0, 0}, {100, 0, 0}, 17500, 9600) ==
+static_assert(gcore::half_angle({5714, 0, 0}, {100, 0, 0}, 17500, gcore::MicrosStep{9600}) ==
               std::array<std::int64_t, 3>{8994291, 0, 0});
 // Negative rates round the same way.
-static_assert(gcore::half_angle({0, -5714, 0}, {0, 0, 0}, 17500, 10000) ==
+static_assert(gcore::half_angle({0, -5714, 0}, {0, 0, 0}, 17500, gcore::MicrosStep{10000}) ==
               std::array<std::int64_t, 3>{0, -9369697, 0});
 
 // h = 2^20 about z from identity: dq = (2^30 - 2^40 / 2^31, 0, 0, 2^20), exactly; |q|^2 =
@@ -338,7 +339,7 @@ constexpr gcore::Stroke fresh(std::array<std::int32_t, 3> gravity_ug) {
 
 constexpr gcore::Raw raw(std::array<std::int16_t, 3> gyro, std::array<std::int16_t, 3> accel,
                          std::uint16_t dt = 9600) {
-    return gcore::Raw{.dt = dt, .gyro = gyro, .accel = accel};
+    return gcore::Raw{.dt = gcore::MicrosStep{dt}, .gyro = gyro, .accel = accel};
 }
 
 // n samples of x, t counted from t_s0 = 0.
@@ -420,8 +421,8 @@ static_assert([] {
 
 // Points round p (nm) to mm and t to 100 us, halves away from zero, and saturate.
 static_assert([] {
-    const gc_point a = gcore::point({1500000, -1500000, 1499999}, 149);
-    const gc_point b = gcore::point({40000000000, -40000000000, 0}, 6553550);
+    const gc_point a = gcore::point({1500000, -1500000, 1499999}, gcore::Micros{149});
+    const gc_point b = gcore::point({40000000000, -40000000000, 0}, gcore::Micros{6553550});
     return a.x_mm == 2 && a.y_mm == -2 && a.z_mm == 1 && a.t_100us == 1 && b.x_mm == 32767 &&
            b.y_mm == -32768 && b.t_100us == 65535;
 }());
@@ -432,14 +433,14 @@ static_assert([] {
 // p = 200 mm and a leftover 100 mm/s on x.
 constexpr gcore::Stroke ended(std::uint32_t t_s0 = 1000) {
     gcore::Stroke s = fresh({0, 0, 1000000});
-    s.t_s0 = t_s0;
+    s.t_s0 = gcore::Micros{t_s0};
     s.points[1] = {.x_mm = 100, .y_mm = 0, .z_mm = 0, .t_100us = 5000};
     s.points[2] = {.x_mm = 200, .y_mm = 0, .z_mm = 0, .t_100us = 10000};
     s.points[3] = {.x_mm = 300, .y_mm = 0, .z_mm = 0, .t_100us = 15000};
     s.n = 4;
     s.snap = {.v = {100000000, 0, -400000},
               .p = {200000000, 0, 0},
-              .t = t_s0 + 1000000,
+              .t = gcore::Micros{t_s0 + 1000000},
               .clipped = false};
     s.snapped = true;
     return s;
@@ -455,7 +456,7 @@ static_assert([] {
                s.points[i].t_100us == t_100us;
     };
     return reason == 0 && s.done && s.n == 4 && at(0, 0, 0) && at(1, 87, 5000) &&
-           at(2, 150, 10000) && at(3, 150, 10000) && s.duration_us == 1000000 &&
+           at(2, 150, 10000) && at(3, 150, 10000) && s.duration.count() == 1000000 &&
            s.v_end_mm_s == 100 && s.extent_mm == 150;
 }());
 
@@ -495,8 +496,8 @@ static_assert([] {
     gc_config cfg = valid_config();
     cfg.max_v_end_mm_s = 65535;
     const std::uint8_t reason = gcore::finish(s, cfg);
-    return reason == GC_REJ_DRIFT && !s.done && s.v_end_mm_s == 65535 && s.duration_us == 1000000 &&
-           s.n == 4;
+    return reason == GC_REJ_DRIFT && !s.done && s.v_end_mm_s == 65535 &&
+           s.duration.count() == 1000000 && s.n == 4;
 }());
 
 // A full buffer at the end: compacted first, then the snapshot point appended.
@@ -634,8 +635,8 @@ void test_start(gesture_test::Tests& t) {
     for (std::uint32_t i = 20; i < 30; ++i) {
         replay_us += 9000 + i;
     }
-    check(t, s.t_s0 == f.t - replay_us);
-    check(t, s.t == f.t && s.c == gcore::guard_n + 1); // replayed up to sample k
+    check(t, s.t_s0.count() == f.t - replay_us);
+    check(t, s.t.count() == f.t && s.c == gcore::guard_n + 1); // replayed up to sample k
     check(t, s.bias_q8 == bias);
     check(t, s.gravity_ug == std::array<std::int32_t, 3>{0, 0, 8197 * 122});
     // The bias has not caught up with the 10 LSB yet: the replay turns a little about x.
@@ -645,7 +646,7 @@ void test_start(gesture_test::Tests& t) {
     check(t, s.v[0] > 0);
     // MOVING: one sample integrated per feed; the bias stays.
     f.feed({10, 0, 0}, {0, 0, 8197});
-    check(t, s.t == f.t && s.c == gcore::guard_n + 2);
+    check(t, s.t.count() == f.t && s.c == gcore::guard_n + 2);
     check(t, f.st().bias_q8 == bias);
 
     // The clock wraps inside the replay: t_s0 is still guard_n + 1 steps back.
@@ -658,7 +659,7 @@ void test_start(gesture_test::Tests& t) {
     w.feed({0, 0, 0}, {1000, 0, 8197});
     const gcore::Stroke& ws = w.st().stroke;
     check(t, w.st().mode == GC_ST_MOVING && w.t < 0x10000U);
-    check(t, ws.t_s0 == w.t - ((gcore::guard_n + 1) * period_us) && ws.t_s0 > w.t);
+    check(t, ws.t_s0.count() == w.t - ((gcore::guard_n + 1) * period_us) && ws.t_s0.count() > w.t);
 }
 
 void test_gap(gesture_test::Tests& t) {

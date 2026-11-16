@@ -7,6 +7,7 @@
 #include "gesture/core.h"
 #include "ring.hpp"
 #include "stroke.hpp"
+#include "units.hpp"
 
 #include <array>
 #include <cstddef>
@@ -21,7 +22,7 @@ struct State {
     Scales sc;
     std::array<std::int32_t, 3> bias_q8; // gyro bias, LSB x 256
     Ring ring;
-    std::uint32_t t_prev; // t_us of the previous sample
+    Micros t_prev;        // stamp of the previous sample
     bool fed;             // a sample came since gc_init (else dt is undefined: a gap)
     std::uint16_t streak; // quiet windows in a row, saturating
     std::uint8_t mode;    // GC_ST_*
