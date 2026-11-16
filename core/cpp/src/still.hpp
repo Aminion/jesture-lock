@@ -55,13 +55,13 @@ constexpr void add(Sums& sums, const std::array<std::int16_t, 3>& x) {
     return true;
 }
 
-// |256 * S - N * bias_q8| < 256 * N * th on every axis: the mean is within th of the bias.
+// |one_q8 * S - N * bias_q8| < one_q8 * N * th on every axis: the mean is within th of the bias.
 [[nodiscard]] constexpr bool rate_ok(const Sums& g, const std::array<std::int32_t, 3>& bias_q8,
                                      std::uint16_t th) {
     constexpr std::int64_t n = win_n;
     for (std::size_t i = 0; i < 3; ++i) {
-        const std::int64_t d = (256 * g.s[i]) - (n * bias_q8[i]);
-        if (iabs(d) >= 256 * n * th) {
+        const std::int64_t d = (one_q8 * g.s[i]) - (n * bias_q8[i]);
+        if (iabs(d) >= one_q8 * n * th) {
             return false;
         }
     }
@@ -75,16 +75,18 @@ constexpr void add(Sums& sums, const std::array<std::int16_t, 3>& x) {
            rate_ok(w.gyro, bias_q8, cfg.still_gyro_rate_lsb);
 }
 
+inline constexpr std::int64_t bias_rate = 64; // docs/core.md step 4: a slow follower
+
 // Step 4, in STILL with the window quiet: if it is also still enough for the bias
-// thresholds, bias_q8 moves 1/64 of the way to the window mean.
+// thresholds, bias_q8 moves 1 / bias_rate of the way to the window mean.
 constexpr void update_bias(std::array<std::int32_t, 3>& bias_q8, const WindowSums& w,
                            const gc_config& cfg) {
     if (!spread_ok(w.gyro, cfg.bias_gyro_std_lsb) || !spread_ok(w.accel, cfg.bias_accel_std_lsb)) {
         return;
     }
     for (std::size_t i = 0; i < 3; ++i) {
-        const std::int64_t mean_q8 = rdiv(256 * w.gyro.s[i], win_n);
-        bias_q8[i] += static_cast<std::int32_t>(rdiv(mean_q8 - bias_q8[i], 64));
+        const std::int64_t mean_q8 = rdiv(one_q8 * w.gyro.s[i], win_n);
+        bias_q8[i] += static_cast<std::int32_t>(rdiv(mean_q8 - bias_q8[i], bias_rate));
     }
 }
 

@@ -102,6 +102,57 @@ using MicroG32 = Quantity<std::int32_t, Unit<Accel, std::micro>>; // stored
 
 template <typename Q> using Vec3 = std::array<Q, 3>;
 
+// A factor num / den for the formulas that cross units or dimensions (docs/core.md
+// "Integration"): scaled(x, s) is x * num / den with one rdiv. Composing multiplies num and
+// den without reducing, so the integers stay those of the spec.
+struct Scale {
+    std::int64_t num;
+    std::int64_t den;
+};
+
+[[nodiscard]] constexpr Scale operator*(Scale a, Scale b) {
+    return {.num = a.num * b.num, .den = a.den * b.den};
+}
+
+[[nodiscard]] constexpr std::int64_t scaled(std::int64_t x, Scale s) {
+    return rdiv(x * s.num, s.den);
+}
+
+template <typename R> [[nodiscard]] constexpr bool same_value(Scale s) {
+    return s.num * R::den == R::num * s.den; // the same fraction, reduced or not
+}
+
+using StandardGravity = std::ratio<980665, 100000>; // 1 g in m/s^2 (CGPM 1901)
+using Pi = std::ratio<355, 113>;                    // relative error 8.5e-8
+
+// Q8 to its integer: LSB x 256 -> LSB.
+inline constexpr Scale from_q8{.num = 1, .den = one_q8};
+
+// ug * us -> nm/s: 10^-6 g * 10^-6 s * 9.80665 m/s^2 per g.
+inline constexpr Scale ug_us_to_nm_s{.num = 980665, .den = 100000000};
+static_assert(
+    same_value<std::ratio_divide<
+        std::ratio_multiply<std::ratio_multiply<MicroG::unit::ratio, std::micro>, StandardGravity>,
+        NanometersPerS::unit::ratio>>(ug_us_to_nm_s));
+
+// nm/s * us -> nm.
+inline constexpr Scale nm_s_us_to_nm{.num = 1, .den = 1000000};
+static_assert(
+    same_value<std::ratio_divide<std::ratio_multiply<NanometersPerS::unit::ratio, std::micro>,
+                                 Nanometers::unit::ratio>>(nm_s_us_to_nm));
+
+// udps * us -> udeg.
+inline constexpr Scale udps_us_to_udeg{.num = 1, .den = 1000000};
+static_assert(
+    same_value<std::ratio_divide<std::ratio_multiply<std::micro, std::micro>, std::micro>>(
+        udps_us_to_udeg));
+
+// udeg -> half the angle in rad, Q30: pi / 180 / 2 * 2^30 / 10^6 = pi * 2^23 / 2812500.
+inline constexpr Scale udeg_to_half_rad_q30{.num = Pi::num * (std::int64_t{1} << 23),
+                                            .den = Pi::den * 2812500};
+static_assert(same_value<std::ratio_multiply<Pi, std::ratio<std::int64_t{1} << 30, 360000000>>>(
+    udeg_to_half_rad_q30));
+
 // q in To's unit (the same dimension, a whole factor coarser), rounded with rdiv and
 // saturated to To's rep.
 template <typename To, typename Rep, typename U>

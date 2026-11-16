@@ -67,16 +67,16 @@ struct Stroke {
     return g;
 }
 
-// Half the turn of one sample, Q30 rad, per axis: w = 256 * gyro - bias_q8 (LSB x 256),
-// ang_udeg = w * sg * dt / (256 * 10^6), h = ang_udeg * pi / 360 * 2^30 with pi = 355/113.
+// Half the turn of one sample, Q30 rad, per axis: w = gyro - bias in Q8 (LSB x 256),
+// ang_udeg = w * sg * dt out of Q8 (udps * us = 10^-6 udeg), h = ang_udeg as half rad, Q30.
 [[nodiscard]] constexpr std::array<std::int64_t, 3>
 half_angle(const std::array<std::int16_t, 3>& gyro, const std::array<std::int32_t, 3>& bias_q8,
            std::int32_t sg, MicrosStep dt) {
     std::array<std::int64_t, 3> h{};
     for (std::size_t i = 0; i < 3; ++i) {
-        const std::int64_t w = (std::int64_t{256} * gyro[i]) - bias_q8[i];
-        const std::int64_t ang_udeg = rdiv(w * sg * us(dt), std::int64_t{256} * 1000000);
-        h[i] = rdiv(ang_udeg * 355 * (std::int64_t{1} << 23), std::int64_t{113} * 2812500);
+        const std::int64_t w = (std::int64_t{one_q8} * gyro[i]) - bias_q8[i];
+        const std::int64_t ang_udeg = scaled(w * sg * us(dt), from_q8 * udps_us_to_udeg);
+        h[i] = scaled(ang_udeg, udeg_to_half_rad_q30);
     }
     return h;
 }
@@ -138,10 +138,9 @@ constexpr void integrate(Stroke& s, const Raw& x, const gc_config& cfg, const Sc
     const Vec3<MicroG> a = calibrated(x.accel, cfg, sc.sa);
     for (std::size_t i = 0; i < 3; ++i) {
         const MicroG f = dot_q30(r[i], a); // (R a)_i: start-frame axis i
-        // ug * us * 9.80665 m/s^2 = nm/s * 980665 / 10^8; nm/s * us = nm * 10^6.
         s.v[i] += NanometersPerS{
-            rdiv((f.in<MicroG>() - s.gravity[i].in<MicroG>()) * us(x.dt) * 980665, 100000000)};
-        s.p[i] += Nanometers{rdiv(s.v[i].in<NanometersPerS>() * us(x.dt), 1000000)};
+            scaled((f.in<MicroG>() - s.gravity[i].in<MicroG>()) * us(x.dt), ug_us_to_nm_s)};
+        s.p[i] += Nanometers{scaled(s.v[i].in<NanometersPerS>() * us(x.dt), nm_s_us_to_nm)};
     }
     for (std::size_t i = 0; i < 3; ++i) {
         const std::int32_t g = x.gyro[i];
@@ -197,8 +196,8 @@ constexpr void integrate(Stroke& s, const Raw& x, const gc_config& cfg, const Sc
         const std::int64_t t = us(PointTicks{pt.t_100us});
         std::array<std::int16_t*, 3> xs{&pt.x_mm, &pt.y_mm, &pt.z_mm};
         for (std::size_t i = 0; i < 3; ++i) {
-            const Nanometers c{
-                rdiv(rdiv(s.snap.v[i].in<NanometersPerS>() * t, 1000000) * t, 2 * us(big_t))};
+            const Nanometers c{rdiv(scaled(s.snap.v[i].in<NanometersPerS>() * t, nm_s_us_to_nm) * t,
+                                    2 * us(big_t))};
             *xs[i] = sat16(*xs[i] - round_to<Millimeters>(c).in<Millimeters>());
             const std::int32_t x = *xs[i];
             extent = std::max(extent, static_cast<std::uint16_t>(iabs(x)));
