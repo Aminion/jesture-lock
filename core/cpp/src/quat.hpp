@@ -10,8 +10,6 @@
 
 namespace gcore {
 
-inline constexpr std::int32_t one_q30 = 1 << 30;
-
 using Quat = std::array<std::int32_t, 4>; // w, x, y, z, Q30
 using Mat3 = std::array<std::array<std::int64_t, 3>, 3>;
 

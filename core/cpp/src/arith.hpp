@@ -7,6 +7,9 @@
 
 namespace gcore {
 
+// 1.0 in Q30: x stands for x / 2^30 (quaternions, rotation matrices, accel gains).
+inline constexpr std::int32_t one_q30 = 1 << 30;
+
 // C++26 renamed saturate_cast to saturating_cast (__cpp_lib_saturation_arithmetic 202603):
 // GCC 15 (firmware) has the old name, GCC 16 (host) the new one.
 template <typename T> [[nodiscard]] constexpr T saturating(std::int64_t x) {
