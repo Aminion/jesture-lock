@@ -34,13 +34,13 @@ pub fn report(rec: &Recording, cfg: &GcConfig) -> anyhow::Result<String> {
                     out,
                     "{at:>6.2}  {name:<13} {:>6.2}  {:>6} {:>6} {:>6}            {:>7.1}  {:>6}  {:>8.2}  {:>10}  {:>6}  {:>4}",
                     s.duration.as_secs_f64(),
-                    s.end_mm[0],
-                    s.end_mm[1],
-                    s.end_mm[2],
+                    s.end[0],
+                    s.end[1],
+                    s.end[2],
                     s.distance_mm,
-                    s.extent_mm,
+                    s.extent,
                     s.peak_mm_s / 1e3,
-                    s.v_end_mm_s,
+                    s.v_end,
                     s.points,
                     s.step
                 )?;
@@ -63,7 +63,7 @@ pub fn report(rec: &Recording, cfg: &GcConfig) -> anyhow::Result<String> {
                     "",
                     "",
                     "",
-                    ev.v_end_mm_s
+                    ev.v_end
                 )?;
             }
         }

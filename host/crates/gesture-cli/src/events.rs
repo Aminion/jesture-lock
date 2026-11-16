@@ -149,7 +149,7 @@ mod tests {
         let mut worst = 0.0_f64;
         for (i, (t_us, p)) in &path {
             assert_eq!(i.t(), Duration::from_micros((t_us + 50) / 100 * 100));
-            let mm = [i.x_mm, i.y_mm, i.z_mm];
+            let mm = i.position();
             for k in 0..3 {
                 worst = worst.max((f64::from(mm[k]) - p[k] * 1000.0).abs());
             }
@@ -186,9 +186,9 @@ mod tests {
                     let stroke = ints.stroke().expect("gc_stroke after STROKE");
                     assert_eq!(usize::from(stroke.info.points), stroke.points.len());
                     assert_eq!(stroke.info.points, ev.points);
-                    f64::from(stroke.info.extent_mm)
+                    f64::from(stroke.info.extent())
                 });
-                a.push((k, ev.kind, ev.duration, f64::from(ev.v_end_mm_s), extent));
+                a.push((k, ev.kind, ev.duration, f64::from(ev.v_end), extent));
             }
             if let Some(e) = floats.feed(*t, s) {
                 let end = |d: &path::Done| (Duration::from_micros(d.duration_us), d.v_end_mm_s);

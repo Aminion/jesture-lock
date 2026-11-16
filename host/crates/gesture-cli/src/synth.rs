@@ -694,7 +694,7 @@ mod tests {
     use std::path::PathBuf;
     use std::time::Duration;
 
-    use gesture_core::{GcPoint, GcStrokeInfo};
+    use gesture_core::{GcPoint, GcStrokeInfo, MmPerS};
 
     use super::*;
 
@@ -719,7 +719,7 @@ mod tests {
     /// The last point of a stroke against the true move (mm, start frame).
     fn ends_near(points: &[GcPoint], truth: V3, tol: f64) {
         let p = points.last().expect("points");
-        let got = [p.x_mm, p.y_mm, p.z_mm].map(f64::from);
+        let got = p.position().map(f64::from);
         for i in 0..3 {
             assert!(
                 (got[i] - truth[i]).abs() <= tol,
@@ -732,11 +732,11 @@ mod tests {
     fn gravity_near(info: &GcStrokeInfo, q: Quat) {
         let truth = q.conj().rotate([0.0, 0.0, 1e6]);
         for i in 0..3 {
-            let d = f64::from(info.gravity_ug[i]) - truth[i];
+            let d = f64::from(info.gravity()[i]) - truth[i];
             assert!(
                 d.abs() < 5000.0,
                 "gravity {:?}, true {truth:?}",
-                info.gravity_ug
+                info.gravity()
             );
         }
     }
@@ -772,7 +772,7 @@ mod tests {
         for ((info, points), t) in s.iter().zip(truth) {
             ends_near(points, t, 5.0);
             gravity_near(info, Quat::ONE);
-            assert!(info.v_end_mm_s < 30, "{info:?}");
+            assert!(info.v_end() < MmPerS(30), "{info:?}");
         }
     }
 
@@ -780,7 +780,7 @@ mod tests {
     fn turn_in_place_stays_put() {
         let (_, _, outs) = case("turn-in-place");
         let end = outs.last().expect("event").ev;
-        assert!(end.v_end_mm_s < 30, "{end:?}");
+        assert!(end.v_end < MmPerS(30), "{end:?}");
     }
 
     #[test]
@@ -855,10 +855,10 @@ mod tests {
     #[test]
     fn drift_reports_the_leftover_velocity() {
         let (_, _, outs) = case("drift");
-        let v = outs.last().expect("event").ev.v_end_mm_s;
+        let v = outs.last().expect("event").ev.v_end.0;
         assert!((480..=520).contains(&v), "{v}");
         let (_, _, outs) = case("drift-max");
-        assert_eq!(outs.last().expect("event").ev.v_end_mm_s, u16::MAX);
+        assert_eq!(outs.last().expect("event").ev.v_end, MmPerS(u16::MAX));
     }
 
     /// Where the clock wraps: inside the replay (s0 + 1 ..= the MOVING sample), or after.

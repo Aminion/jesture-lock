@@ -6,7 +6,7 @@
 use std::time::Duration;
 
 use anyhow::Context;
-use gesture_core::{Core, Event, GcConfig, GcPoint, Kind, Stroke};
+use gesture_core::{Core, Event, GcConfig, GcPoint, Kind, Mm, MmPerS, Stroke};
 
 use crate::recording::{Recording, V3, gc_sample, norm};
 
@@ -15,22 +15,22 @@ use crate::recording::{Recording, V3, gc_sample, norm};
 pub struct Summary {
     pub duration: Duration,
     /// The last point: net displacement in the start frame, mm.
-    pub end_mm: [i16; 3],
+    pub end: [Mm; 3],
     /// |end|, mm.
     pub distance_mm: f64,
     /// Largest speed between consecutive points, mm/s. The points are decimated (a step of
     /// `info.step` samples), so short peaks are averaged out.
     pub peak_mm_s: f64,
     /// Leftover velocity before the correction, mm/s.
-    pub v_end_mm_s: u16,
-    pub extent_mm: u16,
+    pub v_end: MmPerS,
+    pub extent: Mm<u16>,
     pub points: u16,
     pub step: u16,
 }
 
 /// A point's coordinates, mm.
 pub fn mm(p: &GcPoint) -> V3 {
-    [p.x_mm, p.y_mm, p.z_mm].map(f64::from)
+    p.position().map(f64::from)
 }
 
 impl Summary {
@@ -50,11 +50,11 @@ impl Summary {
             .fold(0.0, f64::max);
         Self {
             duration: s.info.duration(),
-            end_mm: [end.x_mm, end.y_mm, end.z_mm],
+            end: end.position(),
             distance_mm: norm(mm(&end)),
             peak_mm_s,
-            v_end_mm_s: s.info.v_end_mm_s,
-            extent_mm: s.info.extent_mm,
+            v_end: s.info.v_end(),
+            extent: s.info.extent(),
             points: s.info.points,
             step: s.info.step,
         }
@@ -116,7 +116,7 @@ mod tests {
             ],
         };
         let s = Summary::of(&stroke);
-        assert_eq!(s.end_mm, [40, 0, 0]);
+        assert_eq!(s.end, [Mm(40), Mm(0), Mm(0)]);
         assert!((s.distance_mm - 40.0).abs() < 1e-9);
         assert!((s.peak_mm_s - 300.0).abs() < 1e-9, "{}", s.peak_mm_s);
     }
@@ -144,10 +144,10 @@ mod tests {
             // Hand-held along a ruler: 0.25..0.36 m here, the error from tilt and drift.
             assert!((200.0..=400.0).contains(&s.distance_mm), "{s:?}");
             assert!(
-                f64::from(s.end_mm[0].unsigned_abs()) > 0.95 * s.distance_mm,
+                f64::from(s.end[0].0.unsigned_abs()) > 0.95 * s.distance_mm,
                 "{s:?}"
             );
-            assert!(s.v_end_mm_s < 50, "{s:?}");
+            assert!(s.v_end < MmPerS(50), "{s:?}");
             assert!((100.0..=600.0).contains(&s.peak_mm_s), "{s:?}");
         }
         let mean = long.iter().map(|s| s.distance_mm).sum::<f64>() / 3.0;

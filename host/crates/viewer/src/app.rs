@@ -185,7 +185,7 @@ impl View {
                 {
                     e.text += &format!(
                         ", |d| {:.0} mm, extent {} mm",
-                        summary.distance_mm, summary.extent_mm
+                        summary.distance_mm, summary.extent
                     );
                 }
                 self.capture.stroke(self.strokes.len());
@@ -220,10 +220,7 @@ fn describe(ev: &Event, limits: Option<Limits>) -> String {
     let s = |us: u32| f64::from(us) / 1e6;
     let dur = ev.duration.as_secs_f64();
     let detail = match (ev.kind, limits) {
-        (Kind::Stroke, _) => format!(
-            "{dur:.2} s, v_end {} mm/s, {} points",
-            ev.v_end_mm_s, ev.points
-        ),
+        (Kind::Stroke, _) => format!("{dur:.2} s, v_end {} mm/s, {} points", ev.v_end, ev.points),
         (Kind::Rejected(Reject::Short), Some(l))
             if ev.duration < Duration::from_micros(l.min_stroke_us.into()) =>
         {
@@ -233,10 +230,9 @@ fn describe(ev: &Event, limits: Option<Limits>) -> String {
         (Kind::Rejected(Reject::Short), Some(l)) => {
             format!("extent < {} mm, {dur:.2} s", l.min_extent_mm)
         }
-        (Kind::Rejected(Reject::Drift), Some(l)) => format!(
-            "v_end {} > {} mm/s, {dur:.2} s",
-            ev.v_end_mm_s, l.max_v_end_mm_s
-        ),
+        (Kind::Rejected(Reject::Drift), Some(l)) => {
+            format!("v_end {} > {} mm/s, {dur:.2} s", ev.v_end, l.max_v_end_mm_s)
+        }
         (Kind::Rejected(Reject::Long), Some(l)) => {
             format!("longer than {:.2} s", s(l.max_stroke_us))
         }
@@ -245,7 +241,7 @@ fn describe(ev: &Event, limits: Option<Limits>) -> String {
         }
         (Kind::Rejected(Reject::TimeGap), _) => "a time gap during the move".to_owned(),
         (Kind::Rejected(r), None) if r.at_end_hold() => {
-            format!("{dur:.2} s, v_end {} mm/s", ev.v_end_mm_s)
+            format!("{dur:.2} s, v_end {} mm/s", ev.v_end)
         }
         _ => String::new(),
     };
@@ -509,10 +505,10 @@ impl Model {
                         ui.label(format!("{t:.2}"));
                         ui.label(format!("{:.2}", s.duration.as_secs_f64()));
                         ui.label(format!("{:.1}", s.distance_mm));
-                        ui.label(format!("{} {} {}", s.end_mm[0], s.end_mm[1], s.end_mm[2]));
+                        ui.label(format!("{} {} {}", s.end[0], s.end[1], s.end[2]));
                         ui.label(format!("{:.2}", s.peak_mm_s / 1e3));
-                        ui.label(format!("{}", s.v_end_mm_s));
-                        ui.label(format!("{}", s.extent_mm));
+                        ui.label(format!("{}", s.v_end));
+                        ui.label(format!("{}", s.extent));
                         ui.label(format!("{} (step {})", stroke.points.len(), s.step));
                         ui.end_row();
                     }
@@ -565,10 +561,10 @@ impl Model {
                 ui.label("no events yet");
             }
         }
-        if let Some(p) = v.live {
+        if let Some(pos) = v.live.map(|p| p.position()) {
             ui.label(format!(
                 "moving: {} {} {} mm from the start (uncorrected)",
-                p.x_mm, p.y_mm, p.z_mm
+                pos[0], pos[1], pos[2]
             ));
         }
         ui.separator();
@@ -633,6 +629,7 @@ impl eframe::App for App {
 mod tests {
     use std::path::Path;
 
+    use gesture_core::MicroG;
     use session::reference::CoreArgs;
 
     use super::*;
@@ -721,7 +718,11 @@ mod tests {
                 })
                 .fold(0.0, f64::max);
             // The board lay flat: up is the board's z.
-            assert!(s.info.gravity_ug[2] > 990_000, "{:?}", s.info.gravity_ug);
+            assert!(
+                s.info.gravity()[2] > MicroG(990_000),
+                "{:?}",
+                s.info.gravity()
+            );
             if len > 100.0 {
                 long += 1;
                 assert!((200.0..400.0).contains(&len), "{len}");

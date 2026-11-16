@@ -12,12 +12,14 @@
 //! not an input error: it panics, naming the rule.
 
 pub mod ffi;
+pub mod units;
 
 use std::fmt;
 use std::time::Duration;
 
 use ffi::{GC_STATE_SIZE, GcEvent, GcState, GcStatus};
 pub use ffi::{GcConfig, GcPoint, GcSample, GcStrokeInfo};
+pub use units::{MicroG, Mm, MmPerS};
 
 /// `gc_status` other than `GC_OK`: why `gc_init` refused the config.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -82,7 +84,7 @@ pub enum Reject {
 }
 
 impl Reject {
-    /// Reported at the end hold, with `v_end_mm_s` and `duration`; the others at once,
+    /// Reported at the end hold, with `v_end` and `duration`; the others at once,
     /// with both 0.
     #[must_use]
     pub const fn at_end_hold(self) -> bool {
@@ -130,7 +132,7 @@ const fn reject_name(r: Reject) -> &'static str {
 }
 
 /// `gc_event`, checked. The numbers are 0 where `docs/core.md` says so: `points` outside
-/// `Stroke`, `v_end_mm_s` and `duration` outside `Stroke` and the end-hold rejects.
+/// `Stroke`, `v_end` and `duration` outside `Stroke` and the end-hold rejects.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct Event {
     pub kind: Kind,
@@ -138,7 +140,7 @@ pub struct Event {
     /// `Stroke`: readable points.
     pub points: u16,
     /// `Stroke`, end-hold rejects: leftover velocity.
-    pub v_end_mm_s: u16,
+    pub v_end: MmPerS,
     /// `Stroke`, end-hold rejects: move length, whole microseconds.
     pub duration: Duration,
 }
@@ -215,7 +217,7 @@ impl TryFrom<GcEvent> for Event {
             kind,
             state,
             points: e.points,
-            v_end_mm_s: e.v_end_mm_s,
+            v_end: MmPerS(e.v_end_mm_s),
             duration: Duration::from_micros(u64::from(e.duration_us)),
         })
     }
@@ -253,7 +255,7 @@ impl From<Event> for GcEvent {
             reason,
             reserved: 0,
             points: e.points,
-            v_end_mm_s: e.v_end_mm_s,
+            v_end_mm_s: e.v_end.0,
             duration_us: micros(e.duration),
         }
     }
@@ -268,6 +270,12 @@ impl GcPoint {
     pub fn t(&self) -> Duration {
         Duration::from_micros(u64::from(self.t_100us) * POINT_TICK_US)
     }
+
+    /// Position in the start frame: x, y, z.
+    #[must_use]
+    pub fn position(&self) -> [Mm; 3] {
+        [Mm(self.x_mm), Mm(self.y_mm), Mm(self.z_mm)]
+    }
 }
 
 impl GcStrokeInfo {
@@ -275,6 +283,24 @@ impl GcStrokeInfo {
     #[must_use]
     pub fn duration(&self) -> Duration {
         Duration::from_micros(u64::from(self.duration_us))
+    }
+
+    /// Leftover velocity before the zero-velocity correction.
+    #[must_use]
+    pub fn v_end(&self) -> MmPerS {
+        MmPerS(self.v_end_mm_s)
+    }
+
+    /// Largest coordinate of the corrected path.
+    #[must_use]
+    pub fn extent(&self) -> Mm<u16> {
+        Mm(self.extent_mm)
+    }
+
+    /// Gravity in the start frame (up, from the gravity window).
+    #[must_use]
+    pub fn gravity(&self) -> [MicroG; 3] {
+        self.gravity_ug.map(MicroG)
     }
 }
 

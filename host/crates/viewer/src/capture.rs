@@ -135,7 +135,7 @@ struct Path {
 
 /// A stroke's rotation by its gravity, and its points in the level frame.
 pub fn levelled(stroke: &Stroke) -> (Level, Vec<V3>) {
-    let level = Level::from_gravity(stroke.info.gravity_ug);
+    let level = Level::from_gravity(stroke.info.gravity());
     (
         level,
         stroke.points.iter().map(|p| level.apply(mm(p))).collect(),
@@ -219,8 +219,8 @@ fn caption(capture: &Capture, strokes: &[(f64, Summary, Stroke)]) -> String {
                 s.distance_mm,
                 s.duration.as_secs_f64(),
                 s.peak_mm_s / 1e3,
-                s.v_end_mm_s,
-                s.extent_mm
+                s.v_end,
+                s.extent
             )
         }
     }

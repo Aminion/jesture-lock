@@ -1,6 +1,8 @@
 //! 3D math for the stroke view, without egui: levelling by gravity, an orbit camera with an
 //! orthographic projection, the best-fit plane of a path. f64, for display only.
 
+use gesture_core::MicroG;
+
 pub type V3 = [f64; 3];
 
 fn dot(a: V3, b: V3) -> f64 {
@@ -39,7 +41,7 @@ fn across(a: V3, n: V3) -> V3 {
 }
 
 /// A rotation from a stroke's start frame (the board's axes at the start, `docs/core.md`)
-/// to the level frame: z up (along `gravity_ug`), x forward (the board's x made
+/// to the level frame: z up (along gravity), x forward (the board's x made
 /// horizontal), y = z x x (left). Rows are the level axes in board coordinates.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Level(pub [V3; 3]);
@@ -52,8 +54,8 @@ impl Level {
     /// its y when the x axis points within ~75 degrees of vertical (no magnetometer, so
     /// nothing better). Zero gravity gives `BOARD`.
     #[must_use]
-    pub fn from_gravity(gravity_ug: [i32; 3]) -> Self {
-        let Some(up) = unit(gravity_ug.map(f64::from)) else {
+    pub fn from_gravity(gravity: [MicroG; 3]) -> Self {
+        let Some(up) = unit(gravity.map(f64::from)) else {
             return Self::BOARD;
         };
         let x = across([1.0, 0.0, 0.0], up);
@@ -344,14 +346,17 @@ mod tests {
 
     #[test]
     fn gravity_up_along_z_is_no_rotation() {
-        assert_eq!(Level::from_gravity([0, 0, 1_000_000]), Level::BOARD);
-        assert_eq!(Level::from_gravity([0, 0, 0]), Level::BOARD);
+        assert_eq!(
+            Level::from_gravity([0, 0, 1_000_000].map(MicroG)),
+            Level::BOARD
+        );
+        assert_eq!(Level::from_gravity([0, 0, 0].map(MicroG)), Level::BOARD);
     }
 
     #[test]
     fn levelling_puts_up_up_and_board_x_forward() {
         // Board on its side, y up: y -> up, x stays forward, z -> right (-left).
-        let l = Level::from_gravity([0, 1_000_000, 0]);
+        let l = Level::from_gravity([0, 1_000_000, 0].map(MicroG));
         check_rotation(l);
         assert!(near(l.apply([0.0, 1.0, 0.0]), [0.0, 0.0, 1.0]));
         assert!(near(l.apply([1.0, 0.0, 0.0]), [1.0, 0.0, 0.0]));
@@ -359,7 +364,7 @@ mod tests {
 
         // Nose up by 45 degrees: up has a +x part in the board frame; board x goes to
         // forward-and-up, a move along board z goes to up-and-back.
-        let l = Level::from_gravity([707_107, 0, 707_107]);
+        let l = Level::from_gravity([707_107, 0, 707_107].map(MicroG));
         check_rotation(l);
         let s = FRAC_1_SQRT_2;
         assert!(near(l.apply([1.0, 0.0, 0.0]), [s, 0.0, s]));
@@ -367,14 +372,14 @@ mod tests {
         assert!(near(l.apply([0.0, 1.0, 0.0]), [0.0, 1.0, 0.0]));
 
         // Board standing on its x end: forward falls back to its y.
-        let l = Level::from_gravity([1_000_000, 0, 0]);
+        let l = Level::from_gravity([1_000_000, 0, 0].map(MicroG));
         check_rotation(l);
         assert!(near(l.apply([1.0, 0.0, 0.0]), [0.0, 0.0, 1.0]));
         assert!(near(l.apply([0.0, 1.0, 0.0]), [1.0, 0.0, 0.0]));
 
         // Any tilt stays a proper rotation with up up.
         let g = [123_000, -456_000, 789_000];
-        let l = Level::from_gravity(g);
+        let l = Level::from_gravity(g.map(MicroG));
         check_rotation(l);
         let up = unit(g.map(f64::from)).expect("g");
         assert!(near(l.apply(up), [0.0, 0.0, 1.0]));
