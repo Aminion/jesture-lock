@@ -5,6 +5,7 @@
 #include "config.hpp"
 #include "gesture/core.h"
 #include "gesture/test/check.hpp"
+#include "quat.hpp"
 #include "ring.hpp"
 #include "state.hpp"
 #include "still.hpp"
