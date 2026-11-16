@@ -6,9 +6,16 @@ FFI. An implementation conforms when it gives the same events and points, bit fo
 the conformance vectors (`core/contract/vectors/v1/README.md`: format, digest, runner), run
 through `core.h` only.
 
-ABI version: **1**, frozen 2026-10-30: the 3D path of one stroke (still detection, gyro
-tilt, gravity removal, double integration, zero-velocity correction). Any change to a
-layout, a constant or a formula is a new version; config values are not part of the spec.
+ABI version: **2** (draft, 2026-11-16): the 3D path of one stroke (still detection, gyro
+tilt, gravity removal, double integration, zero-velocity correction with a tilt term). Any
+change to a layout, a constant or a formula is a new version; config values are not part
+of the spec.
+
+Version 1 (frozen 2026-10-30) differs only in the stroke end: its zero-velocity correction
+has no tilt term. Version 2 adds that term (Stroke end, "Tilt") and one fixed constant
+(`GC_TILT_MAX_UG`); every layout and the config are unchanged. When the tilt term is 0
+(`m = 0` below), version 2 gives the same points as version 1. Vectors for version 2 go in
+`core/contract/vectors/v2/`.
 
 ## Conventions
 - Only C types cross the ABI: fixed-width integers, structs with exactly the layout given
@@ -27,7 +34,7 @@ layout, a constant or a formula is a new version; config values are not part of 
 ## API
 
 ```c
-#define GC_ABI_VERSION   1u
+#define GC_ABI_VERSION   2u
 #define GC_STATE_SIZE    2048u
 #define GC_STATE_ALIGN   8u
 
@@ -193,6 +200,8 @@ sensitivity.)
 - `GC_GRAV_N` = 32: samples in the gravity window.
 - `GC_RING_N` = 48 (>= GC_GRAV_N + GC_GUARD_N + 1): raw samples kept, with their dt.
 - `GC_POINTS_N` = 64: stroke buffer.
+- `GC_TILT_MAX_UG` = 65536 (2^16 ug, about 3.8 degrees of tilt): a larger tilt mismatch at
+  the end hold is not trusted, and the stroke ends without the tilt term.
 
 ### Per sample
 
@@ -214,7 +223,8 @@ sensitivity.)
    - `MOVING`: integrate this sample (below). If now `t - t_s0 > max_stroke_us`:
      `REJECTED(LONG)`, `WARMUP`, and nothing else on this sample. If the streak became
      1: snapshot (v, p, t, clipped flag). If it became 0: drop the snapshot. If it
-     reached hold_n: end the stroke at the snapshot (below), `STILL`, event `STROKE` or
+     reached hold_n: end the stroke at the snapshot (below), with this sample's still
+     window (step 3) and q (after integrating this sample), `STILL`, event `STROKE` or
      `REJECTED`.
 
 ### Stroke start
@@ -265,8 +275,31 @@ At sample k (first non-quiet window), with ring indices relative to k:
 - drop points with t_100us > rdiv(T, 100); append the snapshot point (compacting first if
   the buffer is full). It is appended even when the last kept point has the same t_100us
   (the snapshot sample was stored), giving two equal points.
-- zero-velocity correction per point, with t = 100 * t_100us:
-  `c = rdiv(rdiv(v_end * t, 10^6) * t, 2 * T)` nm, `x_mm = sat16(x_mm - rdiv(c, 10^6))`.
+- tilt (per axis i, ug; it does not change the event or a reject):
+  - the end-hold sample is the sample that ends the stroke; `T_e` = its t - t_s0 (T_e >= T).
+  - accel mean over its still window, calibrated, board frame:
+    `e_i = rdiv((S_i - GC_WIN_N * off_i) * gain_q30_i * sa, GC_WIN_N * 2^30)`, with `S_i`
+    the raw accel sum of step 3 (the formula of the gravity window, with GC_WIN_N).
+  - into the start frame with this sample's R(q): `u_i = rdiv(sum_j R_ij * e_j, 2^30)`.
+  - mismatch `m_i = u_i - g_i`. The board is still in both windows, so the true reading
+    is gravity in both; m is the gravity that the orientation error of q now leaks into
+    the rotated readings (a tilt error delta gives m = delta x g).
+  - keep the part across gravity, the only part a tilt can produce:
+    `G = rdiv(g . g, 2^20)`; if G = 0, m = 0; else `k = rdiv(m . g, G)` (Q20) and
+    `m_i = m_i - rdiv(k * g_i, 2^20)`.
+  - if any |m_i| > GC_TILT_MAX_UG, m = 0.
+  - model: a constant gyro bias tilts q linearly in time, so the leak at time t is
+    `m * t / T_e`. At T: `L_i = rdiv(m_i * T, T_e)` ug; the velocity it left by T,
+    nm/s: `vl_i = rdiv(L_i * T * 980665, 2 * 10^8)` (L T / 2); the constant part of the
+    leftover velocity: `vc_i = v_end_i - vl_i`.
+- zero-velocity correction per point and axis, with t = 100 * t_100us, both terms nm:
+  - constant error: `c = rdiv(rdiv(vc * t, 10^6) * t, 2 * T)` (vc t^2 / (2 T));
+  - tilt error: `d = rdiv(rdiv(rdiv(rdiv(L * t, T) * t, 10^6) * t * 980665, 6 * 10^8)`
+    (L t^3 / (6 T));
+  - `x_mm = sat16(x_mm - rdiv(c + d, 10^6))`.
+
+  At t = T the two terms remove a velocity of `vc + vl = v_end`: the corrected path still
+  ends at rest. With m = 0, `vc = v_end` and `d = 0`: the version 1 correction.
 - extent = largest abs coordinate over the corrected points; SHORT if extent <
   min_extent_mm.
 
@@ -286,3 +319,13 @@ check it; outside it the results are not specified.
   < 4.8e5 nm/s per us, so |v| < 3.2e12 nm/s, `v * dt` < 2^56 and |p| < 2^45 nm.
 - correction: DRIFT runs first, so |v_end_i| < 65535.5 * 10^6 nm/s, and t <= 6553500 us:
   `v_end * t` < 2^59, `rdiv(v_end * t, 10^6) * t` < 2^62.
+- tilt: `S_i - GC_WIN_N * off_i` < 2^21, so e as the gravity; |e_i|, |u_i| < 30.5 g and
+  |m_i| < 48.1 g < 2^26 ug before the projection. |g|^2 < 3 * 2^50: `g . g`, `m . g`
+  < 2^53, G < 2^31. G >= 1 means |g|^2 >= 2^19 (|g| >= 724 ug), and then G >= |g|^2 / 2^21,
+  so |k| <= |m| * 2^21 / |g| < 2^38 and |k * g_i| <= |m| * 2^21 < 2^47. After the
+  GC_TILT_MAX_UG gate |m_i| <= 2^16, and T <= T_e <= 6573500 us < 2^23: `m * T` < 2^39,
+  |L| <= 2^16, `L * T * 980665` < 2^59, |vl| < 2^32 nm/s.
+- correction with tilt: points are cut at rdiv(T, 100), so t <= T + 50 us < 2^22.7.
+  |vc| < 2^36 + 2^32, so `vc * t` < 2^59 and `rdiv(vc * t, 10^6) * t` < 2^62; |c| < 2^39
+  nm. For d: `rdiv(L * t, T)` < 2^17, `* t` < 2^40, after `/ 10^6` < 2^20,
+  `* t * 980665` < 2^62.4; |d| < 2^30 nm, so `c + d` < 2^40.
