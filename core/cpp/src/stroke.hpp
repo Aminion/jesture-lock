@@ -94,7 +94,7 @@ half_angle(const std::array<std::int16_t, 3>& gyro, const std::array<std::int32_
 
 // A coordinate of a point: mm, saturated to int16.
 [[nodiscard]] constexpr std::int16_t point_mm(Nanometers x) {
-    return sat16(round_to<Millimeters>(x).count());
+    return sat16(round_to<Millimeters>(x).in<Millimeters>());
 }
 
 // p at t (since s0) as a point; stored points and gc_live share it.
@@ -137,13 +137,11 @@ constexpr void integrate(Stroke& s, const Raw& x, const gc_config& cfg, const Sc
     const Mat3 r = rotation(s.q);
     const Vec3<MicroG> a = calibrated(x.accel, cfg, sc.sa);
     for (std::size_t i = 0; i < 3; ++i) {
-        const MicroG f{
-            rdiv((r[i][0] * a[0].count()) + (r[i][1] * a[1].count()) + (r[i][2] * a[2].count()),
-                 one_q30)};
+        const MicroG f = dot_q30(r[i], a); // (R a)_i: start-frame axis i
         // ug * us * 9.80665 m/s^2 = nm/s * 980665 / 10^8; nm/s * us = nm * 10^6.
-        s.v[i] +=
-            NanometersPerS{rdiv((f.count() - s.gravity[i].count()) * us(x.dt) * 980665, 100000000)};
-        s.p[i] += Nanometers{rdiv(s.v[i].count() * us(x.dt), 1000000)};
+        s.v[i] += NanometersPerS{
+            rdiv((f.in<MicroG>() - s.gravity[i].in<MicroG>()) * us(x.dt) * 980665, 100000000)};
+        s.p[i] += Nanometers{rdiv(s.v[i].in<NanometersPerS>() * us(x.dt), 1000000)};
     }
     for (std::size_t i = 0; i < 3; ++i) {
         const std::int32_t g = x.gyro[i];
@@ -165,9 +163,10 @@ constexpr void integrate(Stroke& s, const Raw& x, const gc_config& cfg, const Sc
     const Micros big_t = s.snap.t - s.t_s0;
     NanometersPerS v_max{};
     for (const NanometersPerS v : s.snap.v) {
-        v_max = std::max(v_max, NanometersPerS{iabs(v.count())});
+        v_max = std::max(v_max, NanometersPerS{iabs(v.in<NanometersPerS>())});
     }
-    const std::int64_t v_end = round_to<MillimetersPerS>(v_max).count(); // before saturation
+    const std::int64_t v_end =
+        round_to<MillimetersPerS>(v_max).in<MillimetersPerS>(); // before saturation
     s.duration = big_t;
     s.v_end_mm_s = satu16(v_end);
 
@@ -198,8 +197,9 @@ constexpr void integrate(Stroke& s, const Raw& x, const gc_config& cfg, const Sc
         const std::int64_t t = us(PointTicks{pt.t_100us});
         std::array<std::int16_t*, 3> xs{&pt.x_mm, &pt.y_mm, &pt.z_mm};
         for (std::size_t i = 0; i < 3; ++i) {
-            const Nanometers c{rdiv(rdiv(s.snap.v[i].count() * t, 1000000) * t, 2 * us(big_t))};
-            *xs[i] = sat16(*xs[i] - round_to<Millimeters>(c).count());
+            const Nanometers c{
+                rdiv(rdiv(s.snap.v[i].in<NanometersPerS>() * t, 1000000) * t, 2 * us(big_t))};
+            *xs[i] = sat16(*xs[i] - round_to<Millimeters>(c).in<Millimeters>());
             const std::int32_t x = *xs[i];
             extent = std::max(extent, static_cast<std::uint16_t>(iabs(x)));
         }

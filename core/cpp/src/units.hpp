@@ -12,8 +12,10 @@
 #include <chrono>
 #include <compare>
 #include <cstdint>
+#include <limits>
 #include <ratio>
 #include <type_traits>
+#include <utility>
 
 namespace gcore {
 
@@ -36,12 +38,19 @@ template <typename Rep, typename Period>
 }
 
 // Other quantities, in the manner of chrono: a number in one unit. Only the same unit
-// adds, subtracts and compares; formulas across dimensions take count() and stay the
-// integer expressions of docs/core.md.
+// adds, subtracts and compares; formulas across dimensions read the number with
+// in<Unit>(), which names the unit they expect, and stay the integer expressions of
+// docs/core.md.
 template <typename Dim, typename Ratio> struct Unit {
     using dim = Dim;
     using ratio = Ratio; // the unit's size in the dimension's base unit
 };
+
+// To has unit U and a rep that holds every Rep: reading a Quantity<Rep, U> as To is exact.
+template <typename To, typename Rep, typename U>
+concept exactly_as = std::is_same_v<typename To::unit, U> &&
+                     std::in_range<typename To::rep>(std::numeric_limits<Rep>::min()) &&
+                     std::in_range<typename To::rep>(std::numeric_limits<Rep>::max());
 
 template <typename Rep, typename U> class Quantity {
   public:
@@ -51,7 +60,11 @@ template <typename Rep, typename U> class Quantity {
     constexpr Quantity() = default;
     constexpr explicit Quantity(Rep n) : n_{n} {}
 
-    [[nodiscard]] constexpr Rep count() const {
+    // The number in To's unit: only this quantity's own unit, never narrowed. A change of
+    // unit goes through round_to.
+    template <typename To>
+        requires exactly_as<To, Rep, U>
+    [[nodiscard]] constexpr typename To::rep in() const {
         return n_;
     }
 
@@ -96,7 +109,7 @@ template <typename To, typename Rep, typename U>
     static_assert(std::is_same_v<typename To::unit::dim, typename U::dim>);
     using factor = std::ratio_divide<typename To::unit::ratio, typename U::ratio>;
     static_assert(factor::den == 1);
-    return To{saturating<typename To::rep>(rdiv(q.count(), factor::num))};
+    return To{saturating<typename To::rep>(rdiv(q.template in<Quantity<Rep, U>>(), factor::num))};
 }
 
 } // namespace gcore

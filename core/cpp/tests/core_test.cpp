@@ -228,19 +228,30 @@ static_assert(biased(alternating(100, 101), {25600, 25760, 0}, 1) ==
 
 // The counts of a vector of quantities, and back.
 template <typename Q> constexpr std::array<typename Q::rep, 3> counts(const gcore::Vec3<Q>& v) {
-    return {v[0].count(), v[1].count(), v[2].count()};
+    return {v[0].template in<Q>(), v[1].template in<Q>(), v[2].template in<Q>()};
 }
 template <typename Q> constexpr gcore::Vec3<Q> vec3(std::array<typename Q::rep, 3> n) {
     return {Q{n[0]}, Q{n[1]}, Q{n[2]}};
 }
 
 // round_to: halves away from zero, saturated to the target's rep.
-static_assert(gcore::round_to<gcore::Millimeters>(gcore::Nanometers{1500000}).count() == 2);
-static_assert(gcore::round_to<gcore::Millimeters>(gcore::Nanometers{-1500000}).count() == -2);
-static_assert(gcore::round_to<gcore::Millimeters>(gcore::Nanometers{1499999}).count() == 1);
-static_assert(gcore::round_to<gcore::Quantity<std::int16_t, gcore::Millimeters::unit>>(
-                  gcore::Nanometers{40000000000})
-                  .count() == 32767);
+static_assert(
+    gcore::round_to<gcore::Millimeters>(gcore::Nanometers{1500000}).in<gcore::Millimeters>() == 2);
+static_assert(gcore::round_to<gcore::Millimeters>(gcore::Nanometers{-1500000})
+                  .in<gcore::Millimeters>() == -2);
+static_assert(
+    gcore::round_to<gcore::Millimeters>(gcore::Nanometers{1499999}).in<gcore::Millimeters>() == 1);
+using Mm16 = gcore::Quantity<std::int16_t, gcore::Millimeters::unit>;
+static_assert(gcore::round_to<Mm16>(gcore::Nanometers{40000000000}).in<Mm16>() == 32767);
+// in<To>(): the quantity's own unit, widening only; anything else does not compile.
+static_assert(gcore::MicroG32{-7}.in<gcore::MicroG>() == -7);
+template <typename Q, typename To>
+concept readable_as = requires(Q q) { q.template in<To>(); };
+static_assert(readable_as<gcore::Nanometers, gcore::Nanometers>);
+static_assert(!readable_as<gcore::Nanometers, gcore::Millimeters>);    // another unit
+static_assert(!readable_as<gcore::Nanometers, gcore::NanometersPerS>); // another dimension
+static_assert(!readable_as<gcore::MicroG, gcore::MicroG32>);           // narrowing
+static_assert(!readable_as<gcore::Nanometers, std::int64_t>);          // not a quantity
 static_assert(gcore::Nanometers{3} + gcore::Nanometers{-5} == gcore::Nanometers{-2});
 static_assert(gcore::Nanometers{} == gcore::Nanometers{0} &&
               gcore::Nanometers{-1} < gcore::Nanometers{0});
@@ -337,6 +348,22 @@ static_assert([] {
            near(r[1][1], 0) && near(r[2][2], gcore::one_q30) && r[2][0] == 0 && r[0][2] == 0;
 }());
 
+// dot_q30: a Q30 row with a vector, one rounding. Rows of a quarter turn about z send board
+// x to start y.
+static_assert([] {
+    const gcore::Mat3 quarter{
+        {{0, -gcore::one_q30, 0}, {gcore::one_q30, 0, 0}, {0, 0, gcore::one_q30}}};
+    const auto v = vec3<gcore::MicroG>({1000, 0, 7});
+    return gcore::dot_q30(quarter[0], v).in<gcore::MicroG>() == 0 &&
+           gcore::dot_q30(quarter[1], v).in<gcore::MicroG>() == 1000 &&
+           gcore::dot_q30(quarter[2], v).in<gcore::MicroG>() == 7;
+}());
+// Halves round away from zero: 0.5 and -0.5 of 3 ug are 1.5 and -1.5.
+static_assert(gcore::dot_q30({1 << 29, 0, 0}, vec3<gcore::MicroG>({3, 0, 0})).in<gcore::MicroG>() ==
+              2);
+static_assert(
+    gcore::dot_q30({-(1 << 29), 0, 0}, vec3<gcore::MicroG>({3, 0, 0})).in<gcore::MicroG>() == -2);
+
 // The calibration: (raw - off) * gain * sa, one rounding.
 static_assert([] {
     gc_config cfg = valid_config();
@@ -405,8 +432,9 @@ static_assert([] {
     }
     s = run(s, raw({0, 0, 0}, {8197, 0, 0}, 10000), 1);
     // All of one step (98069834) on y; on x, cos(89.996 deg) of it, under 10^4.
-    return s.v[1].count() == 98069834 && s.v[0].count() > 0 && s.v[0].count() < 10000 &&
-           s.v[2].count() == 0;
+    return s.v[1].in<gcore::NanometersPerS>() == 98069834 &&
+           s.v[0].in<gcore::NanometersPerS>() > 0 && s.v[0].in<gcore::NanometersPerS>() < 10000 &&
+           s.v[2].in<gcore::NanometersPerS>() == 0;
 }());
 
 // The clip flag: |reading| >= clip_lsb on any axis, -32768 included.
@@ -667,7 +695,7 @@ void test_start(gesture_test::Tests& t) {
     check(t, s.q[0] < gcore::one_q30 && s.q[1] > 0 && s.q[2] == 0 && s.q[3] == 0);
     check(t, s.n == gcore::guard_n + 2 && s.step == 1 && !s.clipped); // point 0 + replay
     // The jolt, on x.
-    check(t, s.v[0].count() > 0);
+    check(t, s.v[0].in<gcore::NanometersPerS>() > 0);
     // MOVING: one sample integrated per feed; the bias stays.
     f.feed({10, 0, 0}, {0, 0, 8197});
     check(t, s.t.count() == f.t && s.c == gcore::guard_n + 2);
@@ -759,7 +787,8 @@ void test_live(gesture_test::Tests& t) {
                      p.t_100us == last.t_100us);
         check(t, p.t_100us == static_cast<std::uint32_t>(gcore::guard_n + 2 + i) * period_us / 100);
     }
-    check(t, f.st().stroke.v[0].count() > 0 && f.st().stroke.p[0].count() > 0);
+    check(t, f.st().stroke.v[0].in<gcore::NanometersPerS>() > 0 &&
+                 f.st().stroke.p[0].in<gcore::Nanometers>() > 0);
     // A gap ends the move: nothing live.
     f.rest(30000);
     check(t, gc_live(&f.s, &p) == 0 && p.t_100us == 0);

@@ -3,6 +3,7 @@
 // docs/core.md "Integration": the orientation quaternion, Q30, and its rotation matrix.
 
 #include "arith.hpp"
+#include "units.hpp"
 
 #include <array>
 #include <cstddef>
@@ -58,6 +59,15 @@ using Mat3 = std::array<std::array<std::int64_t, 3>, 3>;
         {d((x * y) + (w * z)), one_q30 - d((x * x) + (z * z)), d((y * z) - (w * x))},
         {d((x * z) - (w * y)), d((y * z) + (w * x)), one_q30 - d((x * x) + (y * y))},
     }};
+}
+
+// A row of a Q30 matrix dotted with v, one rdiv back to v's unit: component i of R v is
+// dot_q30(R[i], v).
+template <typename Q>
+[[nodiscard]] constexpr Q dot_q30(const std::array<std::int64_t, 3>& row, const Vec3<Q>& v) {
+    return Q{rdiv((row[0] * v[0].template in<Q>()) + (row[1] * v[1].template in<Q>()) +
+                      (row[2] * v[2].template in<Q>()),
+                  one_q30)};
 }
 
 } // namespace gcore
