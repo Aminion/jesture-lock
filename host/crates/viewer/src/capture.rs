@@ -217,7 +217,7 @@ fn caption(capture: &Capture, strokes: &[(f64, Summary, Stroke)]) -> String {
                 "stroke {}: |d| {:.0} mm, {:.2} s, peak {:.2} m/s, v_end {} mm/s, extent {} mm",
                 i + 1,
                 s.distance_mm,
-                f64::from(s.duration_us) / 1e6,
+                s.duration.as_secs_f64(),
                 s.peak_mm_s / 1e3,
                 s.v_end_mm_s,
                 s.extent_mm

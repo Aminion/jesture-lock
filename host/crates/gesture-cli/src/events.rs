@@ -39,6 +39,7 @@ pub fn report(rec: &Recording, cfg: &GcConfig) -> anyhow::Result<String> {
 #[cfg(test)]
 mod tests {
     use std::path::Path;
+    use std::time::Duration;
 
     use gesture_core::{GcPoint, GcSample, Kind, Reject};
 
@@ -112,7 +113,7 @@ mod tests {
     }
 
     /// Integer and float paths of the first stroke, sample by sample while the float
-    /// reference is in it: (t_100us, mm) of `gc_live` against the float position.
+    /// reference is in it: (time, mm) of `gc_live` against the float position.
     fn first_path(name: &str) -> Vec<(GcPoint, (u64, [f64; 3]))> {
         let rec = load(name);
         let bias = recording::median(&recording::scaled(&rec).expect("scales").gyro);
@@ -147,7 +148,7 @@ mod tests {
         assert!(path.len() > 50, "a stroke of {} samples", path.len());
         let mut worst = 0.0_f64;
         for (i, (t_us, p)) in &path {
-            assert_eq!(u64::from(i.t_100us), (t_us + 50) / 100);
+            assert_eq!(i.t(), Duration::from_micros((t_us + 50) / 100 * 100));
             let mm = [i.x_mm, i.y_mm, i.z_mm];
             for k in 0..3 {
                 worst = worst.max((f64::from(mm[k]) - p[k] * 1000.0).abs());
@@ -164,10 +165,10 @@ mod tests {
         assert!(far > 20.0, "the stroke moved: {far:.1} mm");
     }
 
-    /// One event, as both cores report it: (sample index, kind, duration_us, v_end mm/s,
+    /// One event, as both cores report it: (sample index, kind, duration, v_end mm/s,
     /// extent mm). The last three only at a stroke end; the integer core gives
     /// extent only for `STROKE` (through `gc_stroke`), the float one at every end.
-    type Full = (usize, Kind, u32, f64, Option<f64>);
+    type Full = (usize, Kind, Duration, f64, Option<f64>);
 
     fn full_events(rec: &Recording, cfg: &Config) -> (Vec<Full>, Vec<Full>) {
         let gc = cfg.gc();
@@ -187,19 +188,19 @@ mod tests {
                     assert_eq!(stroke.info.points, ev.points);
                     f64::from(stroke.info.extent_mm)
                 });
-                a.push((k, ev.kind, ev.duration_us, f64::from(ev.v_end_mm_s), extent));
+                a.push((k, ev.kind, ev.duration, f64::from(ev.v_end_mm_s), extent));
             }
             if let Some(e) = floats.feed(*t, s) {
-                let end = |d: &path::Done| (d.duration_us as u32, d.v_end_mm_s);
+                let end = |d: &path::Done| (Duration::from_micros(d.duration_us), d.v_end_mm_s);
                 b.push(match &e {
-                    path::Event::Ready => (k, Kind::Ready, 0, 0.0, None),
-                    path::Event::Moving => (k, Kind::Moving, 0, 0.0, None),
+                    path::Event::Ready => (k, Kind::Ready, Duration::ZERO, 0.0, None),
+                    path::Event::Moving => (k, Kind::Moving, Duration::ZERO, 0.0, None),
                     path::Event::Stroke(d) => {
                         let (dur, v) = end(d);
                         (k, Kind::Stroke, dur, v, Some(d.extent_mm))
                     }
                     path::Event::Rejected(r, d) => {
-                        let (dur, v) = d.as_ref().map_or((0, 0.0), end);
+                        let (dur, v) = d.as_ref().map_or((Duration::ZERO, 0.0), end);
                         let extent = d.as_ref().map(|d| d.extent_mm);
                         (k, Kind::Rejected(reason(r)), dur, v, extent)
                     }
@@ -236,7 +237,7 @@ mod tests {
         let near_min = f.4.is_some_and(|x| (x - MIN_EXTENT_MM).abs() <= 1.0);
         let edge = ((i.1 == Kind::Stroke && short(f)) || (short(i) && f.1 == Kind::Stroke))
             && near_min
-            && u64::from(f.2) >= MIN_STROKE_US;
+            && f.2 >= Duration::from_micros(MIN_STROKE_US);
         edge.then_some(true)
     }
 
@@ -267,7 +268,7 @@ mod tests {
                     Some(true) => edges.push(format!("{name}: int {i:?} vs float {f:?}")),
                     Some(false) => {}
                 }
-                ends += usize::from(i.2 > 0);
+                ends += usize::from(!i.2.is_zero());
             }
         }
         assert!(bad.is_empty(), "{}", bad.join("\n"));

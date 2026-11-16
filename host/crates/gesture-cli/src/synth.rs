@@ -692,6 +692,7 @@ pub fn write_all(dir: &Path) -> anyhow::Result<()> {
 #[cfg(test)]
 mod tests {
     use std::path::PathBuf;
+    use std::time::Duration;
 
     use gesture_core::{GcPoint, GcStrokeInfo};
 
@@ -846,8 +847,9 @@ mod tests {
             .map(|o| &o.ev)
             .filter(|e| matches!(e.kind, Kind::Rejected(_)))
             .collect();
-        assert!(ends[0].duration_us < cfg.min_stroke_us, "{:?}", ends[0]);
-        assert!(ends[1].duration_us >= cfg.min_stroke_us, "{:?}", ends[1]);
+        let min_stroke = Duration::from_micros(cfg.min_stroke_us.into());
+        assert!(ends[0].duration < min_stroke, "{:?}", ends[0]);
+        assert!(ends[1].duration >= min_stroke, "{:?}", ends[1]);
     }
 
     #[test]

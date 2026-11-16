@@ -3,6 +3,8 @@
 //! speed between points, and the residual velocity before the zero-velocity correction
 //! (`v_end_mm_s`). Printed by `gesture-cli strokes`, shown by the viewer.
 
+use std::time::Duration;
+
 use anyhow::Context;
 use gesture_core::{Core, Event, GcConfig, GcPoint, Kind, Stroke};
 
@@ -11,7 +13,7 @@ use crate::recording::{Recording, V3, gc_sample, norm};
 /// One accepted stroke, summed up from `gc_stroke`.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Summary {
-    pub duration_us: u32,
+    pub duration: Duration,
     /// The last point: net displacement in the start frame, mm.
     pub end_mm: [i16; 3],
     /// |end|, mm.
@@ -39,15 +41,15 @@ impl Summary {
             .points
             .windows(2)
             .filter_map(|w| {
-                let dt_100us = w[1].t_100us.checked_sub(w[0].t_100us)?;
-                (dt_100us > 0).then(|| {
+                let dt = w[1].t().checked_sub(w[0].t())?;
+                (!dt.is_zero()).then(|| {
                     let (a, b) = (mm(&w[0]), mm(&w[1]));
-                    norm([b[0] - a[0], b[1] - a[1], b[2] - a[2]]) * 1e4 / f64::from(dt_100us)
+                    norm([b[0] - a[0], b[1] - a[1], b[2] - a[2]]) / dt.as_secs_f64()
                 })
             })
             .fold(0.0, f64::max);
         Self {
-            duration_us: s.info.duration_us,
+            duration: s.info.duration(),
             end_mm: [end.x_mm, end.y_mm, end.z_mm],
             distance_mm: norm(mm(&end)),
             peak_mm_s,

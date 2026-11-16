@@ -33,7 +33,7 @@ pub fn report(rec: &Recording, cfg: &GcConfig) -> anyhow::Result<String> {
                 writeln!(
                     out,
                     "{at:>6.2}  {name:<13} {:>6.2}  {:>6} {:>6} {:>6}            {:>7.1}  {:>6}  {:>8.2}  {:>10}  {:>6}  {:>4}",
-                    f64::from(s.duration_us) / 1e6,
+                    s.duration.as_secs_f64(),
                     s.end_mm[0],
                     s.end_mm[1],
                     s.end_mm[2],
@@ -46,7 +46,7 @@ pub fn report(rec: &Recording, cfg: &GcConfig) -> anyhow::Result<String> {
                 )?;
             }
             // LONG and TIME_GAP end at once, without a duration or v_end.
-            None if ev.duration_us == 0 => {
+            None if ev.duration.is_zero() => {
                 rejected += 1;
                 writeln!(out, "{at:>6.2}  {name}")?;
             }
@@ -56,7 +56,7 @@ pub fn report(rec: &Recording, cfg: &GcConfig) -> anyhow::Result<String> {
                 writeln!(
                     out,
                     "{at:>6.2}  {name:<13} {:>6.2}  {:>6} {:>6} {:>6}            {:>7}  {:>6}  {:>8}  {:>10}",
-                    f64::from(ev.duration_us) / 1e6,
+                    ev.duration.as_secs_f64(),
                     "",
                     "",
                     "",

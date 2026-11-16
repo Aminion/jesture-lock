@@ -7,6 +7,7 @@
 
 use std::collections::VecDeque;
 use std::path::PathBuf;
+use std::time::Duration;
 
 use egui::{CentralPanel, Color32, ComboBox, Panel, RichText, Ui};
 use gesture_core::{Event, GcPoint, Kind, Reject, State, Stroke};
@@ -217,13 +218,15 @@ impl View {
 /// (`docs/core.md`, reject reasons).
 fn describe(ev: &Event, limits: Option<Limits>) -> String {
     let s = |us: u32| f64::from(us) / 1e6;
-    let dur = s(ev.duration_us);
+    let dur = ev.duration.as_secs_f64();
     let detail = match (ev.kind, limits) {
         (Kind::Stroke, _) => format!(
             "{dur:.2} s, v_end {} mm/s, {} points",
             ev.v_end_mm_s, ev.points
         ),
-        (Kind::Rejected(Reject::Short), Some(l)) if ev.duration_us < l.min_stroke_us => {
+        (Kind::Rejected(Reject::Short), Some(l))
+            if ev.duration < Duration::from_micros(l.min_stroke_us.into()) =>
+        {
             format!("{dur:.2} s < {:.2} s", s(l.min_stroke_us))
         }
         // Duration passed, so the extent did not (it is checked last).
@@ -504,7 +507,7 @@ impl Model {
                     for (i, (t, s, stroke)) in v.strokes.iter().enumerate() {
                         ui.label(format!("{}", i + 1));
                         ui.label(format!("{t:.2}"));
-                        ui.label(format!("{:.2}", f64::from(s.duration_us) / 1e6));
+                        ui.label(format!("{:.2}", s.duration.as_secs_f64()));
                         ui.label(format!("{:.1}", s.distance_mm));
                         ui.label(format!("{} {} {}", s.end_mm[0], s.end_mm[1], s.end_mm[2]));
                         ui.label(format!("{:.2}", s.peak_mm_s / 1e3));

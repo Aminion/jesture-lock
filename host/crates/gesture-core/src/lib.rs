@@ -14,6 +14,7 @@
 pub mod ffi;
 
 use std::fmt;
+use std::time::Duration;
 
 use ffi::{GC_STATE_SIZE, GcEvent, GcState, GcStatus};
 pub use ffi::{GcConfig, GcPoint, GcSample, GcStrokeInfo};
@@ -81,7 +82,7 @@ pub enum Reject {
 }
 
 impl Reject {
-    /// Reported at the end hold, with `v_end_mm_s` and `duration_us`; the others at once,
+    /// Reported at the end hold, with `v_end_mm_s` and `duration`; the others at once,
     /// with both 0.
     #[must_use]
     pub const fn at_end_hold(self) -> bool {
@@ -129,7 +130,7 @@ const fn reject_name(r: Reject) -> &'static str {
 }
 
 /// `gc_event`, checked. The numbers are 0 where `docs/core.md` says so: `points` outside
-/// `Stroke`, `v_end_mm_s` and `duration_us` outside `Stroke` and the end-hold rejects.
+/// `Stroke`, `v_end_mm_s` and `duration` outside `Stroke` and the end-hold rejects.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct Event {
     pub kind: Kind,
@@ -138,8 +139,8 @@ pub struct Event {
     pub points: u16,
     /// `Stroke`, end-hold rejects: leftover velocity.
     pub v_end_mm_s: u16,
-    /// `Stroke`, end-hold rejects: move length.
-    pub duration_us: u32,
+    /// `Stroke`, end-hold rejects: move length, whole microseconds.
+    pub duration: Duration,
 }
 
 impl Event {
@@ -215,13 +216,16 @@ impl TryFrom<GcEvent> for Event {
             state,
             points: e.points,
             v_end_mm_s: e.v_end_mm_s,
-            duration_us: e.duration_us,
+            duration: Duration::from_micros(u64::from(e.duration_us)),
         })
     }
 }
 
 impl From<Event> for GcEvent {
     /// The exact `gc_event` the event came from.
+    ///
+    /// # Panics
+    /// If `duration` is not whole microseconds below 2^32 (never for an event from the core).
     fn from(e: Event) -> Self {
         let (kind, reason) = match e.kind {
             Kind::None => (ffi::GC_EV_NONE, 0),
@@ -250,9 +254,41 @@ impl From<Event> for GcEvent {
             reserved: 0,
             points: e.points,
             v_end_mm_s: e.v_end_mm_s,
-            duration_us: e.duration_us,
+            duration_us: micros(e.duration),
         }
     }
+}
+
+/// `gc_point.t_100us` and `gc_point.t()`: microseconds per tick.
+const POINT_TICK_US: u64 = 100;
+
+impl GcPoint {
+    /// Time since the stroke start.
+    #[must_use]
+    pub fn t(&self) -> Duration {
+        Duration::from_micros(u64::from(self.t_100us) * POINT_TICK_US)
+    }
+}
+
+impl GcStrokeInfo {
+    /// Stroke length, start to the end snapshot.
+    #[must_use]
+    pub fn duration(&self) -> Duration {
+        Duration::from_micros(u64::from(self.duration_us))
+    }
+}
+
+/// A duration as `core.h` microseconds.
+///
+/// # Panics
+/// If `d` is not a whole number of microseconds below 2^32: never for a duration that came
+/// from the core.
+fn micros(d: Duration) -> u32 {
+    assert!(
+        d.subsec_nanos().is_multiple_of(1000),
+        "{d:?} is not whole microseconds"
+    );
+    u32::try_from(d.as_micros()).unwrap_or_else(|_| panic!("{d:?} does not fit u32 us"))
 }
 
 /// The last stroke, from `gc_stroke`: its info and all its points.
@@ -449,6 +485,27 @@ mod tests {
         for e in bad {
             assert!(Event::try_from(e).is_err(), "{e:?}");
         }
+    }
+
+    #[test]
+    fn times_in_their_units() {
+        let p = GcPoint {
+            t_100us: u16::MAX,
+            ..GcPoint::default()
+        };
+        assert_eq!(p.t(), Duration::from_micros(6_553_500));
+        let info = GcStrokeInfo {
+            duration_us: u32::MAX,
+            ..GcStrokeInfo::default()
+        };
+        assert_eq!(info.duration(), Duration::from_micros(u64::from(u32::MAX)));
+        assert_eq!(micros(info.duration()), u32::MAX);
+    }
+
+    #[test]
+    #[should_panic(expected = "not whole microseconds")]
+    fn sub_microsecond_durations_are_refused() {
+        let _ = micros(Duration::from_nanos(1500));
     }
 
     #[test]
