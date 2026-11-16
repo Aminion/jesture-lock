@@ -58,6 +58,7 @@ Flash one or the other. Results of both paths on the same recording must match b
   `calibration.md` (calibration tool and file), `template_format.md`,
   `pinout.md` (MCU pins and IMU wiring),
   `todo.md` (current step plan, deferred adjustments),
+  `tilt_correction_experiment.md` (the dropped ABI 2 tilt term: what was tried, why not),
   `datasheets/` (vendor PDFs, gitignored; manifest + checksums committed).
 - `data/`: recorded sessions.
 

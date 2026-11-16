@@ -330,3 +330,16 @@ run. It needs a line in `docs/protocol.md` if a counter is added or `stuck` is r
   cannot show more: the z offset cancels when the board does not tilt.
 - With the hand thresholds `ruler-15-4g` gives 7 strokes and 15 rejected fragments: table
   slides need the table preset, as on 2026-10-30.
+
+## Start gravity window catches slow starts (2026-11-16)
+
+Found while testing the tilt term (`docs/tilt_correction_experiment.md`, dropped): with the
+hand thresholds, table slides along x showed end-hold mismatches of 0.7-1.9 degrees with
+almost no rotation, along the slide direction. The gravity window (and the end window) took
+in part of the motion. Version 1 removes a constant gravity error at the end, so lengths
+suffer less than that suggests, but the start of a stroke is still misplaced.
+
+Candidates: a stricter quiet test on the gravity window itself, or moving the stroke start
+back to where the readings begin to leave gravity. Check with `--hold hand` and
+`--hold table` on the ruler sessions, and on strokes that end where they started (true end
+displacement 0) for gestures in the hand.
