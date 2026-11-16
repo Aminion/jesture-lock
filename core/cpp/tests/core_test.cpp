@@ -224,6 +224,27 @@ static_assert(biased(alternating(90, 110), {0, 0, -1}, 10) ==
 static_assert(biased(alternating(100, 101), {25600, 25760, 0}, 1) ==
               std::array<std::int32_t, 3>{25602, 25759, 402});
 
+// --- quantities ------------------------------------------------------------------------
+
+// The counts of a vector of quantities, and back.
+template <typename Q> constexpr std::array<typename Q::rep, 3> counts(const gcore::Vec3<Q>& v) {
+    return {v[0].count(), v[1].count(), v[2].count()};
+}
+template <typename Q> constexpr gcore::Vec3<Q> vec3(std::array<typename Q::rep, 3> n) {
+    return {Q{n[0]}, Q{n[1]}, Q{n[2]}};
+}
+
+// round_to: halves away from zero, saturated to the target's rep.
+static_assert(gcore::round_to<gcore::Millimeters>(gcore::Nanometers{1500000}).count() == 2);
+static_assert(gcore::round_to<gcore::Millimeters>(gcore::Nanometers{-1500000}).count() == -2);
+static_assert(gcore::round_to<gcore::Millimeters>(gcore::Nanometers{1499999}).count() == 1);
+static_assert(gcore::round_to<gcore::Quantity<std::int16_t, gcore::Millimeters::unit>>(
+                  gcore::Nanometers{40000000000})
+                  .count() == 32767);
+static_assert(gcore::Nanometers{3} + gcore::Nanometers{-5} == gcore::Nanometers{-2});
+static_assert(gcore::Nanometers{} == gcore::Nanometers{0} &&
+              gcore::Nanometers{-1} < gcore::Nanometers{0});
+
 // --- stroke start: the gravity window -------------------------------------------------
 
 // A full ring: ages 0 .. guard_n and past the window hold +-30000 (must not count); the
@@ -256,7 +277,7 @@ constexpr std::array<std::int32_t, 3> gravity_with(Cal cal) {
         cfg.accel_offset_lsb[i] = cal.off;
         cfg.accel_gain_q30[i] = cal.gain_q30;
     }
-    return gcore::gravity_ug(gravity_ring(-100, 8197), cfg, 122);
+    return counts(gcore::gravity_of(gravity_ring(-100, 8197), cfg, 122));
 }
 
 // Offset 0, gain 1: the mean times sa, rounded once. z: 8197.5 * 122 = 1000095.
@@ -271,7 +292,7 @@ static_assert([] {
     gc_config cfg = valid_config();
     cfg.accel_offset_lsb[0] = -32768;
     cfg.accel_gain_q30[0] = gcore::gain_max_q30;
-    const auto g = gcore::gravity_ug(gravity_ring(32767, 0), cfg, 488);
+    const auto g = counts(gcore::gravity_of(gravity_ring(32767, 0), cfg, 488));
     // (32766.5 + 32768) * gain_max (1.1 - 4e-10) * 488 = 35178919.588
     return g[0] == 35178920;
 }());
@@ -323,14 +344,14 @@ static_assert([] {
     cfg.accel_offset_lsb[2] = -10;
     cfg.accel_gain_q30[1] = 3 << 29;
     // x: 8187 * 122; y: 1.5 * 3 * 122 = 549; z: -32758 * 122.
-    return gcore::accel_ug({8197, 3, -32768}, cfg, 122) ==
+    return counts(gcore::calibrated({8197, 3, -32768}, cfg, 122)) ==
            std::array<std::int64_t, 3>{998814, 549, -3996476};
 }());
 
 // A stroke from rest at identity, with this gravity (ug, start frame).
-constexpr gcore::Stroke fresh(std::array<std::int32_t, 3> gravity_ug) {
+constexpr gcore::Stroke fresh(std::array<std::int32_t, 3> g_ug) {
     gcore::Stroke s{};
-    s.gravity_ug = gravity_ug;
+    s.gravity = vec3<gcore::MicroG32>(g_ug);
     s.q = identity;
     s.step = 1;
     s.n = 1;
@@ -354,8 +375,8 @@ constexpr gcore::Stroke run(gcore::Stroke s, const gcore::Raw& x, int n,
 // At rest, exactly at gravity and bias: nothing moves, nothing turns, ever.
 static_assert([] {
     const gcore::Stroke s = run(fresh({0, 0, 8197 * 122}), raw({0, 0, 0}, {0, 0, 8197}), 300);
-    return s.q == identity && s.v == std::array<std::int64_t, 3>{} &&
-           s.p == std::array<std::int64_t, 3>{} && !s.clipped && s.c == 300;
+    return s.q == identity && counts(s.v) == std::array<std::int64_t, 3>{} &&
+           counts(s.p) == std::array<std::int64_t, 3>{} && !s.clipped && s.c == 300;
 }());
 
 // 1 g along x for 10 x 10 ms, no gravity in the frame: v grows by the same step each
@@ -369,8 +390,8 @@ static_assert([] {
     for (std::int64_t k = 1; k <= 10; ++k) {
         p += gcore::rdiv(k * dv * 10000, 1000000);
     }
-    return s.v == std::array<std::int64_t, 3>{10 * dv, 0, 0} &&
-           s.p == std::array<std::int64_t, 3>{p, 0, 0};
+    return counts(s.v) == std::array<std::int64_t, 3>{10 * dv, 0, 0} &&
+           counts(s.p) == std::array<std::int64_t, 3>{p, 0, 0};
 }());
 
 // Turn ~90 deg about z (90 x 10 ms at 99.995 dps), then 1 g along board x: it must show
@@ -378,13 +399,14 @@ static_assert([] {
 static_assert([] {
     gcore::Stroke s = run(fresh({0, 0, 0}), raw({0, 0, 5714}, {0, 0, 0}, 10000), 90);
     // q ~ (cos 45, 0, 0, sin 45): 759279940 each for exactly 89.9955 deg.
-    if (s.v != std::array<std::int64_t, 3>{} || s.q[1] != 0 || s.q[2] != 0 || s.q[0] < 759200000 ||
-        s.q[0] > 759300000 || s.q[3] < 759200000 || s.q[3] > 759300000) {
+    if (counts(s.v) != std::array<std::int64_t, 3>{} || s.q[1] != 0 || s.q[2] != 0 ||
+        s.q[0] < 759200000 || s.q[0] > 759300000 || s.q[3] < 759200000 || s.q[3] > 759300000) {
         return false;
     }
     s = run(s, raw({0, 0, 0}, {8197, 0, 0}, 10000), 1);
     // All of one step (98069834) on y; on x, cos(89.996 deg) of it, under 10^4.
-    return s.v[1] == 98069834 && s.v[0] > 0 && s.v[0] < 10000 && s.v[2] == 0;
+    return s.v[1].count() == 98069834 && s.v[0].count() > 0 && s.v[0].count() < 10000 &&
+           s.v[2].count() == 0;
 }());
 
 // The clip flag: |reading| >= clip_lsb on any axis, -32768 included.
@@ -421,8 +443,10 @@ static_assert([] {
 
 // Points round p (nm) to mm and t to 100 us, halves away from zero, and saturate.
 static_assert([] {
-    const gc_point a = gcore::point({1500000, -1500000, 1499999}, gcore::Micros{149});
-    const gc_point b = gcore::point({40000000000, -40000000000, 0}, gcore::Micros{6553550});
+    const gc_point a =
+        gcore::point(vec3<gcore::Nanometers>({1500000, -1500000, 1499999}), gcore::Micros{149});
+    const gc_point b = gcore::point(vec3<gcore::Nanometers>({40000000000, -40000000000, 0}),
+                                    gcore::Micros{6553550});
     return a.x_mm == 2 && a.y_mm == -2 && a.z_mm == 1 && a.t_100us == 1 && b.x_mm == 32767 &&
            b.y_mm == -32768 && b.t_100us == 65535;
 }());
@@ -438,8 +462,8 @@ constexpr gcore::Stroke ended(std::uint32_t t_s0 = 1000) {
     s.points[2] = {.x_mm = 200, .y_mm = 0, .z_mm = 0, .t_100us = 10000};
     s.points[3] = {.x_mm = 300, .y_mm = 0, .z_mm = 0, .t_100us = 15000};
     s.n = 4;
-    s.snap = {.v = {100000000, 0, -400000},
-              .p = {200000000, 0, 0},
+    s.snap = {.v = vec3<gcore::NanometersPerS>({100000000, 0, -400000}),
+              .p = vec3<gcore::Nanometers>({200000000, 0, 0}),
               .t = gcore::Micros{t_s0 + 1000000},
               .clipped = false};
     s.snapped = true;
@@ -492,7 +516,7 @@ static_assert(end_with([](gcore::Stroke&, gc_config& c) { c.min_extent_mm = 150;
 // before the correction (whose products it bounds). The event still gets T and v_end.
 static_assert([] {
     gcore::Stroke s = ended();
-    s.snap.v = {70000000000, 0, 0};
+    s.snap.v = vec3<gcore::NanometersPerS>({70000000000, 0, 0});
     gc_config cfg = valid_config();
     cfg.max_v_end_mm_s = 65535;
     const std::uint8_t reason = gcore::finish(s, cfg);
@@ -638,12 +662,12 @@ void test_start(gesture_test::Tests& t) {
     check(t, s.t_s0.count() == f.t - replay_us);
     check(t, s.t.count() == f.t && s.c == gcore::guard_n + 1); // replayed up to sample k
     check(t, s.bias_q8 == bias);
-    check(t, s.gravity_ug == std::array<std::int32_t, 3>{0, 0, 8197 * 122});
+    check(t, counts(s.gravity) == std::array<std::int32_t, 3>{0, 0, 8197 * 122});
     // The bias has not caught up with the 10 LSB yet: the replay turns a little about x.
     check(t, s.q[0] < gcore::one_q30 && s.q[1] > 0 && s.q[2] == 0 && s.q[3] == 0);
     check(t, s.n == gcore::guard_n + 2 && s.step == 1 && !s.clipped); // point 0 + replay
     // The jolt, on x.
-    check(t, s.v[0] > 0);
+    check(t, s.v[0].count() > 0);
     // MOVING: one sample integrated per feed; the bias stays.
     f.feed({10, 0, 0}, {0, 0, 8197});
     check(t, s.t.count() == f.t && s.c == gcore::guard_n + 2);
@@ -735,7 +759,7 @@ void test_live(gesture_test::Tests& t) {
                      p.t_100us == last.t_100us);
         check(t, p.t_100us == static_cast<std::uint32_t>(gcore::guard_n + 2 + i) * period_us / 100);
     }
-    check(t, f.st().stroke.v[0] > 0 && f.st().stroke.p[0] > 0);
+    check(t, f.st().stroke.v[0].count() > 0 && f.st().stroke.p[0].count() > 0);
     // A gap ends the move: nothing live.
     f.rest(30000);
     check(t, gc_live(&f.s, &p) == 0 && p.t_100us == 0);

@@ -1,6 +1,6 @@
 #pragma once
 
-// Units of the core's time values, as types: docs/core.md "Per sample" and "Ranges".
+// Units of the core's values, as types: docs/core.md "Per sample" and "Ranges".
 // MCU time stamps (gc_sample.t_us) wrap; they share the unsigned 32-bit rep of the spans
 // so that a difference of two stamps still wraps. A change of unit rounds with rdiv
 // (halves away from zero), never with duration_cast (truncates) or chrono::round (ties to
@@ -8,9 +8,12 @@
 
 #include "arith.hpp"
 
+#include <array>
 #include <chrono>
+#include <compare>
 #include <cstdint>
 #include <ratio>
+#include <type_traits>
 
 namespace gcore {
 
@@ -30,6 +33,70 @@ template <typename Rep, typename Period>
 [[nodiscard]] constexpr PointTicks point_ticks(Micros t) {
     constexpr std::int64_t us_per_tick = us(PointTicks{1});
     return PointTicks{satu16(rdiv(t.count(), us_per_tick))};
+}
+
+// Other quantities, in the manner of chrono: a number in one unit. Only the same unit
+// adds, subtracts and compares; formulas across dimensions take count() and stay the
+// integer expressions of docs/core.md.
+template <typename Dim, typename Ratio> struct Unit {
+    using dim = Dim;
+    using ratio = Ratio; // the unit's size in the dimension's base unit
+};
+
+template <typename Rep, typename U> class Quantity {
+  public:
+    using rep = Rep;
+    using unit = U;
+
+    constexpr Quantity() = default;
+    constexpr explicit Quantity(Rep n) : n_{n} {}
+
+    [[nodiscard]] constexpr Rep count() const {
+        return n_;
+    }
+
+    constexpr Quantity& operator+=(Quantity q) {
+        n_ = static_cast<Rep>(n_ + q.n_);
+        return *this;
+    }
+    constexpr Quantity& operator-=(Quantity q) {
+        n_ = static_cast<Rep>(n_ - q.n_);
+        return *this;
+    }
+    [[nodiscard]] friend constexpr Quantity operator+(Quantity a, Quantity b) {
+        return a += b;
+    }
+    [[nodiscard]] friend constexpr Quantity operator-(Quantity a, Quantity b) {
+        return a -= b;
+    }
+    friend constexpr auto operator<=>(const Quantity&, const Quantity&) = default;
+
+  private:
+    Rep n_; // no initializer: Quantity stays trivial, value-initialized to 0 like an int
+};
+
+// Dimensions.
+struct Length {};
+struct Speed {};
+struct Accel {}; // in standard gravity, g
+
+using Nanometers = Quantity<std::int64_t, Unit<Length, std::nano>>;
+using Millimeters = Quantity<std::int64_t, Unit<Length, std::milli>>;
+using NanometersPerS = Quantity<std::int64_t, Unit<Speed, std::nano>>;
+using MillimetersPerS = Quantity<std::int64_t, Unit<Speed, std::milli>>;
+using MicroG = Quantity<std::int64_t, Unit<Accel, std::micro>>;
+using MicroG32 = Quantity<std::int32_t, Unit<Accel, std::micro>>; // stored
+
+template <typename Q> using Vec3 = std::array<Q, 3>;
+
+// q in To's unit (the same dimension, a whole factor coarser), rounded with rdiv and
+// saturated to To's rep.
+template <typename To, typename Rep, typename U>
+[[nodiscard]] constexpr To round_to(Quantity<Rep, U> q) {
+    static_assert(std::is_same_v<typename To::unit::dim, typename U::dim>);
+    using factor = std::ratio_divide<typename To::unit::ratio, typename U::ratio>;
+    static_assert(factor::den == 1);
+    return To{saturating<typename To::rep>(rdiv(q.count(), factor::num))};
 }
 
 } // namespace gcore

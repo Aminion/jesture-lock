@@ -20,26 +20,26 @@ namespace gcore {
 
 // The stroke as of the first quiet window after the move (streak 1).
 struct Snap {
-    std::array<std::int64_t, 3> v; // nm/s
-    std::array<std::int64_t, 3> p; // nm
-    Micros t;                      // stamp
+    Vec3<NanometersPerS> v;
+    Vec3<Nanometers> p;
+    Micros t; // stamp
     bool clipped;
 };
 
 struct Stroke {
-    std::array<std::int32_t, 3> bias_q8;    // gyro bias, frozen at the start
-    std::array<std::int32_t, 3> gravity_ug; // gravity window mean, calibrated, start frame
-    Quat q;                                 // start frame <- board frame
-    std::array<std::int64_t, 3> v;          // nm/s, start frame
-    std::array<std::int64_t, 3> p;          // nm, start frame
-    Micros t_s0;                            // stamp of the start sample
-    Micros t;                               // stamp of the newest integrated sample
-    std::uint32_t c;                        // samples integrated since s0
-    std::uint32_t step;                     // samples per stored point (point i: c = i * step)
-    std::uint8_t n;                         // points stored
-    bool clipped;                           // a raw reading at clip_lsb or beyond
-    bool snapped;                           // snap is valid
-    bool done;                              // ended as GC_EV_STROKE: gc_stroke reads it
+    std::array<std::int32_t, 3> bias_q8; // gyro bias, frozen at the start
+    Vec3<MicroG32> gravity;              // gravity window mean, calibrated, start frame
+    Quat q;                              // start frame <- board frame
+    Vec3<NanometersPerS> v;              // start frame
+    Vec3<Nanometers> p;                  // start frame
+    Micros t_s0;                         // stamp of the start sample
+    Micros t;                            // stamp of the newest integrated sample
+    std::uint32_t c;                     // samples integrated since s0
+    std::uint32_t step;                  // samples per stored point (point i: c = i * step)
+    std::uint8_t n;                      // points stored
+    bool clipped;                        // a raw reading at clip_lsb or beyond
+    bool snapped;                        // snap is valid
+    bool done;                           // ended as GC_EV_STROKE: gc_stroke reads it
     Snap snap;
     Micros duration;          // after the end: t_snap - t_s0
     std::uint16_t v_end_mm_s; // after the end
@@ -47,22 +47,22 @@ struct Stroke {
     std::array<gc_point, points_n> points;
 };
 
-// Gravity, ug per axis: the mean raw accel of ages guard_n + 1 .. guard_n + grav_n (the
+// Gravity per axis: the mean raw accel of ages guard_n + 1 .. guard_n + grav_n (the
 // window that ends at s0), calibrated. One rdiv over the sum, so the mean is not rounded
 // first. |S - N * off| < 2^22, * gain < 2^53, * sa < 2^62.
-[[nodiscard]] constexpr std::array<std::int32_t, 3> gravity_ug(const Ring& r, const gc_config& cfg,
-                                                               std::int32_t sa) {
+[[nodiscard]] constexpr Vec3<MicroG32> gravity_of(const Ring& r, const gc_config& cfg,
+                                                  std::int32_t sa) {
     std::array<std::int64_t, 3> s{};
     for (int age = guard_n + 1; age <= guard_n + grav_n; ++age) {
         for (std::size_t i = 0; i < 3; ++i) {
             s[i] += at(r, age).accel[i];
         }
     }
-    std::array<std::int32_t, 3> g{};
+    Vec3<MicroG32> g{};
     for (std::size_t i = 0; i < 3; ++i) {
         const std::int64_t d = s[i] - (std::int64_t{grav_n} * cfg.accel_offset_lsb[i]);
-        g[i] = static_cast<std::int32_t>(
-            rdiv(d * cfg.accel_gain_q30[i] * sa, std::int64_t{grav_n} * one_q30));
+        g[i] = MicroG32{static_cast<std::int32_t>(
+            rdiv(d * cfg.accel_gain_q30[i] * sa, std::int64_t{grav_n} * one_q30))};
     }
     return g;
 }
@@ -81,22 +81,27 @@ half_angle(const std::array<std::int16_t, 3>& gyro, const std::array<std::int32_
     return h;
 }
 
-// Calibrated accel, ug: (raw - off) * gain * sa.
-[[nodiscard]] constexpr std::array<std::int64_t, 3>
-accel_ug(const std::array<std::int16_t, 3>& accel, const gc_config& cfg, std::int32_t sa) {
-    std::array<std::int64_t, 3> a{};
+// Calibrated accel: (raw - off) * gain * sa.
+[[nodiscard]] constexpr Vec3<MicroG> calibrated(const std::array<std::int16_t, 3>& accel,
+                                                const gc_config& cfg, std::int32_t sa) {
+    Vec3<MicroG> a{};
     for (std::size_t i = 0; i < 3; ++i) {
         const std::int64_t d = std::int64_t{accel[i]} - cfg.accel_offset_lsb[i];
-        a[i] = rdiv(d * cfg.accel_gain_q30[i] * sa, one_q30);
+        a[i] = MicroG{rdiv(d * cfg.accel_gain_q30[i] * sa, one_q30)};
     }
     return a;
 }
 
-// p (nm) at t (since s0) as a point; stored points and gc_live share it.
-[[nodiscard]] constexpr gc_point point(const std::array<std::int64_t, 3>& p, Micros t) {
-    return gc_point{.x_mm = sat16(rdiv(p[0], 1000000)),
-                    .y_mm = sat16(rdiv(p[1], 1000000)),
-                    .z_mm = sat16(rdiv(p[2], 1000000)),
+// A coordinate of a point: mm, saturated to int16.
+[[nodiscard]] constexpr std::int16_t point_mm(Nanometers x) {
+    return sat16(round_to<Millimeters>(x).count());
+}
+
+// p at t (since s0) as a point; stored points and gc_live share it.
+[[nodiscard]] constexpr gc_point point(const Vec3<Nanometers>& p, Micros t) {
+    return gc_point{.x_mm = point_mm(p[0]),
+                    .y_mm = point_mm(p[1]),
+                    .z_mm = point_mm(p[2]),
                     .t_100us = point_ticks(t).count()};
 }
 
@@ -130,12 +135,15 @@ constexpr void integrate(Stroke& s, const Raw& x, const gc_config& cfg, const Sc
                          Micros t) {
     s.q = renormalize(turn(s.q, half_angle(x.gyro, s.bias_q8, sc.sg, x.dt)));
     const Mat3 r = rotation(s.q);
-    const std::array<std::int64_t, 3> a = accel_ug(x.accel, cfg, sc.sa);
+    const Vec3<MicroG> a = calibrated(x.accel, cfg, sc.sa);
     for (std::size_t i = 0; i < 3; ++i) {
-        const std::int64_t f =
-            rdiv((r[i][0] * a[0]) + (r[i][1] * a[1]) + (r[i][2] * a[2]), one_q30);
-        s.v[i] += rdiv((f - s.gravity_ug[i]) * us(x.dt) * 980665, 100000000);
-        s.p[i] += rdiv(s.v[i] * us(x.dt), 1000000);
+        const MicroG f{
+            rdiv((r[i][0] * a[0].count()) + (r[i][1] * a[1].count()) + (r[i][2] * a[2].count()),
+                 one_q30)};
+        // ug * us * 9.80665 m/s^2 = nm/s * 980665 / 10^8; nm/s * us = nm * 10^6.
+        s.v[i] +=
+            NanometersPerS{rdiv((f.count() - s.gravity[i].count()) * us(x.dt) * 980665, 100000000)};
+        s.p[i] += Nanometers{rdiv(s.v[i].count() * us(x.dt), 1000000)};
     }
     for (std::size_t i = 0; i < 3; ++i) {
         const std::int32_t g = x.gyro[i];
@@ -155,11 +163,11 @@ constexpr void integrate(Stroke& s, const Raw& x, const gc_config& cfg, const Sc
 // DRIFT before the correction bounds v_end there (docs/core.md "Ranges").
 [[nodiscard]] constexpr std::uint8_t finish(Stroke& s, const gc_config& cfg) {
     const Micros big_t = s.snap.t - s.t_s0;
-    std::int64_t v_max = 0;
-    for (const std::int64_t v : s.snap.v) {
-        v_max = std::max(v_max, iabs(v));
+    NanometersPerS v_max{};
+    for (const NanometersPerS v : s.snap.v) {
+        v_max = std::max(v_max, NanometersPerS{iabs(v.count())});
     }
-    const std::int64_t v_end = rdiv(v_max, 1000000); // mm/s, before saturation
+    const std::int64_t v_end = round_to<MillimetersPerS>(v_max).count(); // before saturation
     s.duration = big_t;
     s.v_end_mm_s = satu16(v_end);
 
@@ -190,8 +198,8 @@ constexpr void integrate(Stroke& s, const Raw& x, const gc_config& cfg, const Sc
         const std::int64_t t = us(PointTicks{pt.t_100us});
         std::array<std::int16_t*, 3> xs{&pt.x_mm, &pt.y_mm, &pt.z_mm};
         for (std::size_t i = 0; i < 3; ++i) {
-            const std::int64_t c = rdiv(rdiv(s.snap.v[i] * t, 1000000) * t, 2 * us(big_t));
-            *xs[i] = sat16(*xs[i] - rdiv(c, 1000000));
+            const Nanometers c{rdiv(rdiv(s.snap.v[i].count() * t, 1000000) * t, 2 * us(big_t))};
+            *xs[i] = sat16(*xs[i] - round_to<Millimeters>(c).count());
             const std::int32_t x = *xs[i];
             extent = std::max(extent, static_cast<std::uint16_t>(iabs(x)));
         }
@@ -210,7 +218,7 @@ constexpr void start(Stroke& s, const Ring& r, const gc_config& cfg, const Scale
                      const std::array<std::int32_t, 3>& bias_q8, Micros t_k) {
     s = Stroke{};
     s.bias_q8 = bias_q8;
-    s.gravity_ug = gravity_ug(r, cfg, sc.sa);
+    s.gravity = gravity_of(r, cfg, sc.sa);
     s.q = {one_q30, 0, 0, 0};
     s.step = 1;
     s.n = 1; // point 0: (0, 0, 0) at t 0

@@ -139,7 +139,8 @@ extern "C" std::uint16_t gc_stroke(const gc_state* s, gc_stroke_info* info, gc_p
     info->duration_us = k.duration.count();
     info->points = k.n;
     info->v_end_mm_s = k.v_end_mm_s;
-    std::ranges::copy(k.gravity_ug, std::begin(info->gravity_ug));
+    std::ranges::transform(k.gravity, std::begin(info->gravity_ug),
+                           [](gcore::MicroG32 g) { return g.count(); });
     info->extent_mm = k.extent_mm;
     info->step = gcore::satu16(k.step);
     const std::uint16_t n = std::min<std::uint16_t>(k.n, cap);
