@@ -11,11 +11,12 @@
 namespace gcore {
 
 // Fixed constants.
-inline constexpr int win_n = 32;    // still window
-inline constexpr int guard_n = 10;  // gravity window end -> stroke start
-inline constexpr int grav_n = 32;   // gravity window
-inline constexpr int ring_n = 48;   // raw samples kept
-inline constexpr int points_n = 64; // stroke buffer
+inline constexpr int win_n = 32;                         // still window
+inline constexpr int guard_n = 10;                       // gravity window end -> stroke start
+inline constexpr int grav_n = 32;                        // gravity window
+inline constexpr int ring_n = 48;                        // raw samples kept
+inline constexpr int points_n = 64;                      // stroke buffer
+inline constexpr MicroG tilt_max{std::int64_t{1} << 16}; // GC_TILT_MAX_UG, about 3.8 degrees
 static_assert(ring_n >= grav_n + guard_n + 1);
 
 // Accel sensitivity, ug/LSB, from FS_XL = CTRL1_XL[3:2]. Every code is in the table.

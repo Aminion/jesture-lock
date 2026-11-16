@@ -9,6 +9,7 @@
 #include "units.hpp"
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <cstdint>
 #include <iterator>
@@ -38,7 +39,8 @@ gc_event rejected(std::uint8_t reason) {
 }
 
 // MOVING, after integrating this sample: too long, or the end hold (snapshot, end).
-gc_event moving(gcore::State& st) {
+// end_accel_sum: the raw accel sum of this sample's still window (step 3).
+gc_event moving(gcore::State& st, const std::array<std::int64_t, 3>& end_accel_sum) {
     gcore::Stroke& k = st.stroke;
     if (k.t - k.t_s0 > gcore::Micros{st.cfg.max_stroke_us}) {
         st.mode = GC_ST_WARMUP;
@@ -51,7 +53,7 @@ gc_event moving(gcore::State& st) {
         k.snap = {.v = k.v, .p = k.p, .t = k.t, .clipped = k.clipped};
         k.snapped = true;
     } else if (st.streak == st.cfg.hold_n) { // > 1: the snapshot is there
-        const std::uint8_t reason = gcore::finish(k, st.cfg);
+        const std::uint8_t reason = gcore::finish(k, st.cfg, st.sc.sa, end_accel_sum);
         st.mode = GC_ST_STILL;
         if (reason != 0) {
             ev = rejected(reason);
@@ -96,8 +98,9 @@ extern "C" gc_event gc_feed(gc_state* s, const gc_sample* in) {
 
     // 3. Still window, 4. bias update.
     bool quiet = false;
+    gcore::WindowSums w{}; // MOVING always has a full window: a hold came before
     if (st.ring.count >= gcore::win_n) {
-        const gcore::WindowSums w = gcore::window_sums(st.ring);
+        w = gcore::window_sums(st.ring);
         quiet = gcore::quiet(w, st.cfg, st.bias_q8);
         st.streak = quiet ? gcore::satu16(st.streak + 1) : std::uint16_t{0};
         if (quiet && st.mode == GC_ST_STILL) {
@@ -122,7 +125,7 @@ extern "C" gc_event gc_feed(gc_state* s, const gc_sample* in) {
         break;
     default: // GC_ST_MOVING
         gcore::integrate(st.stroke, gcore::at(st.ring, 0), st.cfg, st.sc, t);
-        ev = moving(st);
+        ev = moving(st, w.accel.s);
         break;
     }
     ev.state = st.mode;

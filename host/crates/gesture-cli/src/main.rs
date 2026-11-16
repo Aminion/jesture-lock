@@ -95,14 +95,14 @@ enum Command {
         #[arg(long)]
         out: PathBuf,
     },
-    /// Write every committed conformance vector (`core/contract/vectors/v1/README.md`):
+    /// Write every committed conformance vector (`core/contract/vectors/v2/README.md`):
     /// from the recordings in `vector::SESSIONS`, and the synthetic ones (`synth.rs`).
     Vectors {
         /// The `data` directory (the recordings in `sessions/`).
         #[arg(long, default_value = "../data")]
         data: PathBuf,
         /// Output directory.
-        #[arg(long, default_value = "../core/contract/vectors/v1")]
+        #[arg(long, default_value = "../core/contract/vectors/v2")]
         out: PathBuf,
     },
     /// Guided calibration of the board (`docs/calibration.md`): rest on the table, then

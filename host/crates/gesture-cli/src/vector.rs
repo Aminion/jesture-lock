@@ -214,7 +214,7 @@ fn digest(cfg: &GcConfig, samples: &[GcSample]) -> anyhow::Result<Expect> {
     })
 }
 
-/// The committed vectors from recordings, under `core/contract/vectors/v1/`: (file, session under
+/// The committed vectors from recordings, under `core/contract/vectors/v2/`: (file, session under
 /// `data/sessions/`, samples from the start; `None`: all). All calibrated with `tumble`
 /// (the motion sessions are +-2 g), the initial gyro bias from `rest-table`, hand
 /// thresholds. The first is the board vector, embedded by `recognize`.
@@ -327,7 +327,7 @@ pub mod tests {
 
     /// The committed vectors of ABI v1.
     pub fn vectors() -> PathBuf {
-        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../core/contract/vectors/v1")
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../core/contract/vectors/v2")
     }
 
     #[test]

@@ -141,6 +141,14 @@ static_assert(
     same_value<std::ratio_divide<std::ratio_multiply<NanometersPerS::unit::ratio, std::micro>,
                                  Nanometers::unit::ratio>>(nm_s_us_to_nm));
 
+// us -> s, as a factor inside a longer product (the tilt term of the correction).
+inline constexpr Scale us_to_s{.num = 1, .den = 1000000};
+static_assert(same_value<std::micro>(us_to_s));
+
+// Halves and sixths: the t^2 / 2 and t^3 / 6 of a constant and a linearly growing error.
+inline constexpr Scale half{.num = 1, .den = 2};
+inline constexpr Scale sixth{.num = 1, .den = 6};
+
 // udps * us -> udeg.
 inline constexpr Scale udps_us_to_udeg{.num = 1, .den = 1000000};
 static_assert(

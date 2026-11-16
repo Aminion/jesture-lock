@@ -33,7 +33,7 @@ gesture_firmware(recognize recognize/main.cpp)
 target_link_libraries(recognize PRIVATE gesture_core)
 # The board self-test vector (gesture-cli vector), embedded with #embed. The compiler's
 # depfile does not list it, so name it here to rebuild when it is regenerated.
-set(GESTURE_BOARD_VECTOR ${PROJECT_SOURCE_DIR}/core/contract/vectors/v1/air-lines.gcv)
+set(GESTURE_BOARD_VECTOR ${PROJECT_SOURCE_DIR}/core/contract/vectors/v2/air-lines.gcv)
 target_compile_definitions(recognize PRIVATE GESTURE_BOARD_VECTOR="${GESTURE_BOARD_VECTOR}")
 # The board's calibration file (gesture-cli calibrate, docs/calibration.md), embedded and
 # checked at build time.

@@ -98,7 +98,9 @@ template <typename F> constexpr gc_status validate_with(F change) {
 static_assert(gcore::validate(valid_config()) == GC_OK);
 
 static_assert(validate_with([](gc_config& c) { c.abi_version = 0; }) == GC_ERR_VERSION);
-static_assert(validate_with([](gc_config& c) { c.abi_version = 2; }) == GC_ERR_VERSION);
+static_assert(validate_with([](gc_config& c) { c.abi_version = 1; }) ==
+              GC_ERR_VERSION); // version 1 is frozen
+static_assert(validate_with([](gc_config& c) { c.abi_version = 3; }) == GC_ERR_VERSION);
 static_assert(validate_with([](gc_config& c) { c.ctrl1_xl = 0; }) == GC_ERR_SCALE);
 static_assert(validate_with([](gc_config& c) { c.ctrl2_g = 0; }) == GC_ERR_SCALE);
 
@@ -481,6 +483,44 @@ static_assert([] {
 
 // --- stroke end ------------------------------------------------------------------------
 
+// The raw accel sum of an end-hold window that reads s.gravity back exactly at sa = 1 and
+// unit calibration: with q at identity the tilt term is 0, as in ABI version 1.
+constexpr std::array<std::int64_t, 3> level_end(const gcore::Stroke& s) {
+    std::array<std::int64_t, 3> sum{};
+    for (std::size_t i = 0; i < 3; ++i) {
+        sum[i] = std::int64_t{gcore::win_n} * s.gravity[i].in<gcore::MicroG32>();
+    }
+    return sum;
+}
+
+// tilt_leak: the part across gravity only (30000 ug on x stays, the 10000 along g goes),
+// nothing beyond tilt_max, and nothing without gravity.
+static_assert(counts(gcore::tilt_leak(vec3<gcore::MicroG32>({30000, 0, 1010000}), identity,
+                                      vec3<gcore::MicroG32>({0, 0, 1000000}))) ==
+              std::array<std::int64_t, 3>{30000, 0, 0});
+static_assert(counts(gcore::tilt_leak(vec3<gcore::MicroG32>({65536, 0, 1000000}), identity,
+                                      vec3<gcore::MicroG32>({0, 0, 1000000}))) ==
+              std::array<std::int64_t, 3>{65536, 0, 0});
+static_assert(counts(gcore::tilt_leak(vec3<gcore::MicroG32>({65537, 0, 1000000}), identity,
+                                      vec3<gcore::MicroG32>({0, 0, 1000000}))) ==
+              std::array<std::int64_t, 3>{0, 0, 0});
+static_assert(counts(gcore::tilt_leak(vec3<gcore::MicroG32>({500, 0, 0}), identity,
+                                      vec3<gcore::MicroG32>({0, 0, 0}))) ==
+              std::array<std::int64_t, 3>{0, 0, 0});
+
+// correct_drift, tilt term alone: a leak growing to 60000 ug at T = 1 s moves a point by
+// lead t^3 / (6 T): 98.07 mm at 1 s, 12.26 mm at 0.5 s.
+static_assert([] {
+    std::array<gc_point, 3> pts{{{.x_mm = 0, .y_mm = 0, .z_mm = 5, .t_100us = 0},
+                                 {.x_mm = 100, .y_mm = 0, .z_mm = 5, .t_100us = 5000},
+                                 {.x_mm = 200, .y_mm = 0, .z_mm = 5, .t_100us = 10000}}};
+    const std::uint16_t extent =
+        gcore::correct_drift(pts, vec3<gcore::NanometersPerS>({0, 0, 0}),
+                             vec3<gcore::MicroG>({60000, 0, 0}), gcore::Micros{1000000});
+    return pts[0].x_mm == 0 && pts[1].x_mm == 88 && pts[2].x_mm == 102 && pts[2].z_mm == 5 &&
+           extent == 102;
+}());
+
 // correct_drift: 100 mm/s left on x after T = 1 s takes c = v t^2 / (2 T) off each point
 // (12.5 mm rounds to 13 at 0.5 s, 50 mm at 1 s), nothing at t = 0, and reports the extent.
 static_assert([] {
@@ -488,7 +528,8 @@ static_assert([] {
                                  {.x_mm = 100, .y_mm = 0, .z_mm = 5, .t_100us = 5000},
                                  {.x_mm = 200, .y_mm = 0, .z_mm = 5, .t_100us = 10000}}};
     const auto v = vec3<gcore::NanometersPerS>({100000000, 0, 0});
-    const std::uint16_t extent = gcore::correct_drift(pts, v, gcore::Micros{1000000});
+    const std::uint16_t extent =
+        gcore::correct_drift(pts, v, vec3<gcore::MicroG>({0, 0, 0}), gcore::Micros{1000000});
     return pts[0].x_mm == 0 && pts[1].x_mm == 87 && pts[2].x_mm == 150 && pts[2].z_mm == 5 &&
            extent == 150;
 }());
@@ -506,6 +547,7 @@ constexpr gcore::Stroke ended(std::uint32_t t_s0 = 1000) {
               .t = gcore::Micros{t_s0 + 1000000},
               .clipped = false};
     s.snapped = true;
+    s.t = s.snap.t + gcore::Micros{200000}; // the end-hold sample, 0.2 s after the snapshot
     return s;
 }
 
@@ -513,7 +555,7 @@ constexpr gcore::Stroke ended(std::uint32_t t_s0 = 1000) {
 // the snapshot point is appended even though a point already sits at t = T.
 static_assert([] {
     gcore::Stroke s = ended(0xFFFFFFF0U); // the clock wraps inside the stroke
-    const std::uint8_t reason = gcore::finish(s, valid_config());
+    const std::uint8_t reason = gcore::finish(s, valid_config(), 1, level_end(s));
     const auto at = [&](std::size_t i, std::int16_t x, std::uint16_t t_100us) {
         return s.points[i].x_mm == x && s.points[i].y_mm == 0 && s.points[i].z_mm == 0 &&
                s.points[i].t_100us == t_100us;
@@ -523,12 +565,27 @@ static_assert([] {
            s.v_end_mm_s == 100 && s.extent_mm == 150;
 }());
 
+// With a tilt: the end hold reads 20000 ug across gravity, 1.2 s after s0. The leak at T
+// is 16667 ug and left 81723718 nm/s of the 100 mm/s; the rest is constant. At T the
+// correction is 9.14 mm (constant) + 27.24 mm (tilt) = 36 mm instead of 50: a growing
+// error has moved the point less for the same leftover velocity. 0.5 s: 2.28 + 3.41 = 6 mm.
+static_assert([] {
+    gcore::Stroke s = ended();
+    s.t = s.snap.t + gcore::Micros{200000};
+    const std::array<std::int64_t, 3> tilted{std::int64_t{gcore::win_n} * 20000, 0,
+                                             std::int64_t{gcore::win_n} * 1000000};
+    const std::uint8_t reason = gcore::finish(s, valid_config(), 1, tilted);
+    return reason == 0 && s.n == 4 && s.points[1].x_mm == 94 && s.points[2].x_mm == 164 &&
+           s.points[3].x_mm == 164 && s.points[2].z_mm == 0 && s.extent_mm == 164 &&
+           s.v_end_mm_s == 100;
+}());
+
 // The checks, in order: CLIPPED, SHORT (duration), DRIFT, SHORT (extent).
 template <typename F> constexpr std::uint8_t end_with(F change) {
     gcore::Stroke s = ended();
     gc_config cfg = valid_config();
     change(s, cfg);
-    const std::uint8_t reason = gcore::finish(s, cfg);
+    const std::uint8_t reason = gcore::finish(s, cfg, 1, level_end(s));
     return s.done == (reason == 0) ? reason : 0xFF;
 }
 
@@ -558,7 +615,7 @@ static_assert([] {
     s.snap.v = vec3<gcore::NanometersPerS>({70000000000, 0, 0});
     gc_config cfg = valid_config();
     cfg.max_v_end_mm_s = 65535;
-    const std::uint8_t reason = gcore::finish(s, cfg);
+    const std::uint8_t reason = gcore::finish(s, cfg, 1, level_end(s));
     return reason == GC_REJ_DRIFT && !s.done && s.v_end_mm_s == 65535 &&
            s.duration.count() == 1000000 && s.n == 4;
 }());
@@ -567,7 +624,7 @@ static_assert([] {
 static_assert([] {
     gcore::Stroke s = run(fresh({}), raw({0, 0, 0}, {0, 0, 0}), 63); // 64 points
     s.snap = {.v = {}, .p = {}, .t = s.t, .clipped = false};
-    const std::uint8_t reason = gcore::finish(s, valid_config());
+    const std::uint8_t reason = gcore::finish(s, valid_config(), 1, level_end(s));
     return reason == GC_REJ_SHORT && s.n == 33 && s.step == 2 && s.points[31].t_100us == 62 * 96 &&
            s.points[32].t_100us == 63 * 96;
 }());

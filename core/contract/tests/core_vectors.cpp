@@ -1,7 +1,7 @@
 // The conformance vectors (core/contract/vectors/, docs/core.md): each file given on the command
 // line is replayed from gc_init through gesture/core.h only, and its digest compared with
 // the one stored in it. Any implementation of core.h linked here runs the same suite.
-// Layout and digest: core/contract/vectors/v1/README.md (written by `gesture-cli vectors`).
+// Layout and digest: core/contract/vectors/v2/README.md (written by `gesture-cli vectors`).
 #include "gesture/core.h"
 
 #include <algorithm>
@@ -18,7 +18,7 @@
 
 namespace {
 
-// Header field offsets (vectors/v1/README.md).
+// Header field offsets (vectors/v2/README.md).
 constexpr std::size_t samples_at = 4;
 constexpr std::size_t events_at = 8;
 constexpr std::size_t digest_at = 12;

@@ -1,4 +1,4 @@
-//! `synth`: synthetic conformance vectors (`core/contract/vectors/v1/README.md`). Each case is a known
+//! `synth`: synthetic conformance vectors (`core/contract/vectors/v2/README.md`). Each case is a known
 //! motion turned into ideal IMU readings (f64 physics, then the inverse calibration and
 //! rounding to raw LSB, plus integer LCG noise), written as a GCV1 vector (`vector.rs`)
 //! with the result the core gives on it.

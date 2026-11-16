@@ -24,6 +24,11 @@ const RING_N: usize = 48;
 /// Bias update rate: `bias += (mean - bias) / 64` per quiet sample.
 const BIAS_RATE: f64 = 64.0;
 
+/// `GC_TILT_MAX_UG`: a larger tilt mismatch at the end hold is not trusted.
+const TILT_MAX_UG: f64 = 65536.0;
+/// Gravity shorter than this gives no direction: the integer core's `G = 0` (`g . g < 2^19`).
+const MIN_GRAVITY_UG: f64 = 724.0;
+
 type Quat = [f64; 4];
 
 fn quat_mul(a: Quat, b: Quat) -> Quat {
@@ -57,6 +62,25 @@ fn turn(q: Quat, w: V3, dt: f64) -> Quat {
 
 fn dot(a: V3, b: V3) -> f64 {
     (0..3).map(|i| a[i] * b[i]).sum()
+}
+
+/// `docs/core.md` "Stroke end", tilt: the end hold's reading (board frame) turned back with
+/// the stroke's q, against the start gravity. The part across gravity, or zero beyond
+/// `TILT_MAX_UG`.
+fn tilt_leak(end_ug: V3, q: Quat, g: V3) -> V3 {
+    let gg = dot(g, g);
+    if gg.sqrt() < MIN_GRAVITY_UG {
+        return [0.0; 3];
+    }
+    let u = rotate(q, end_ug);
+    let m: V3 = std::array::from_fn(|i| u[i] - g[i]);
+    let k = dot(m, g) / gg;
+    let m: V3 = std::array::from_fn(|i| m[i] - k * g[i]);
+    if m.iter().any(|x| x.abs() > TILT_MAX_UG) {
+        [0.0; 3]
+    } else {
+        m
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -148,13 +172,22 @@ impl Stroke {
         self.points.push((self.t_us, self.p));
     }
 
-    /// Ends at the snapshot. `end_gravity_ug`: the end hold's accel, body frame.
+    /// Ends at the snapshot, called at the end-hold sample (`self.q`, `self.t_us`).
+    /// `end_gravity_ug`: the end hold's accel mean, calibrated, body frame.
     fn finish(&self, end_gravity_ug: V3) -> Result<Done, (Reject, Done)> {
         let snap = self.snap.expect("a confirmed hold has a snapshot");
-        let t_end = snap.t_us as f64;
+        let t_end = snap.t_us as f64 / 1e6; // T, s
+        // The tilt leak grows linearly to m at the end-hold sample: lead at T. The velocity
+        // it left by T is lead T / 2; the rest of v_end is the constant part vc.
+        let m = tilt_leak(end_gravity_ug, self.q, self.gravity_ug);
+        let lead: V3 =
+            std::array::from_fn(|i| m[i] * 1e-6 * recording::G * t_end / (self.t_us as f64 / 1e6)); // m/s^2
+        let vc: V3 = std::array::from_fn(|i| snap.v[i] - lead[i] * t_end / 2.0);
         let correct = |t: u64, p: V3| -> V3 {
-            let t = t as f64;
-            std::array::from_fn(|i| p[i] - snap.v[i] * (t / 1e6) * (t / 1e6) / (2.0 * t_end / 1e6))
+            let t = t as f64 / 1e6;
+            std::array::from_fn(|i| {
+                p[i] - vc[i] * t * t / (2.0 * t_end) - lead[i] * t * t * t / (6.0 * t_end)
+            })
         };
         let extent_mm = self
             .points
@@ -359,10 +392,10 @@ impl<'a> Core<'a> {
             }
             n if n >= HOLD_N => {
                 let (sa, _) = self.sums(WIN_N, 0, |e| e.accel);
-                let end_gravity = self.cfg.accel_ug(
-                    // Mean raw accel of the window, rounded only for the calibration call.
-                    sa.map(|x| (x / WIN_N as f64).round() as i16),
-                );
+                // Mean raw accel of the window, then calibrated, as the gravity at the start.
+                let end_gravity: V3 = std::array::from_fn(|i| {
+                    (sa[i] / WIN_N as f64 - self.cfg.offset_lsb[i]) * self.cfg.gain[i] * self.cfg.sa
+                });
                 let result = self
                     .stroke
                     .take()

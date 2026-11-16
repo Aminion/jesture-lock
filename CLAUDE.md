@@ -33,12 +33,12 @@ Flash one or the other. Results of both paths on the same recording must match b
   recognition), never in the viewer or the firmware apps.
   `gesture/core.h` is a contract between languages, like the wire format: specified in
   `docs/core.md` (ABI plus bit-exact algorithm spec), checked by conformance vectors
-  (`core/contract/vectors/v1/`) run through `core.h` only. The C++ code is the first implementation;
+  (`core/contract/vectors/v2/`) run through `core.h` only. The C++ code is the first implementation;
   another language may replace it, so the Rust host and the firmware see `core.h` and
   nothing else, and the caller owns the state (size fixed in the header).
   - `core/contract/`: implementation-independent: `include/gesture/core.h` (CMake
     `gesture_core_abi`), its C11 check, the vector runner (`tests/`) and the conformance
-    vectors, one directory per ABI version (`vectors/v1/`).
+    vectors, one directory per ABI version (`vectors/v1/`, `vectors/v2/`).
   - `core/cpp/`: the C++ implementation (`gesture_core`, internal headers in `src/`, unit
     tests in `tests/`). Callers link `gesture_core`, whichever implementation provides it
     (CMake option `GESTURE_CORE_IMPL`, a directory under `core/`; same env variable for cargo).

@@ -48,9 +48,21 @@ struct Stroke {
     std::array<gc_point, points_n> points;
 };
 
+// The calibrated mean of n raw accel readings summed to s, per axis. One rdiv over the sum,
+// so the mean is not rounded first. |S - N * off| < 2^22, * gain < 2^53, * sa < 2^62.
+[[nodiscard]] constexpr Vec3<MicroG32> calibrated_mean(const std::array<std::int64_t, 3>& s, int n,
+                                                       const gc_config& cfg, std::int32_t sa) {
+    Vec3<MicroG32> m{};
+    for (std::size_t i = 0; i < 3; ++i) {
+        const std::int64_t d = s[i] - (std::int64_t{n} * cfg.accel_offset_lsb[i]);
+        m[i] = MicroG32{static_cast<std::int32_t>(
+            rdiv(d * cfg.accel_gain_q30[i] * sa, std::int64_t{n} * one_q30))};
+    }
+    return m;
+}
+
 // Gravity per axis: the mean raw accel of ages guard_n + 1 .. guard_n + grav_n (the
-// window that ends at s0), calibrated. One rdiv over the sum, so the mean is not rounded
-// first. |S - N * off| < 2^22, * gain < 2^53, * sa < 2^62.
+// window that ends at s0), calibrated.
 [[nodiscard]] constexpr Vec3<MicroG32> gravity_of(const Ring& r, const gc_config& cfg,
                                                   std::int32_t sa) {
     std::array<std::int64_t, 3> s{};
@@ -59,13 +71,7 @@ struct Stroke {
             s[i] += at(r, age).accel[i];
         }
     }
-    Vec3<MicroG32> g{};
-    for (std::size_t i = 0; i < 3; ++i) {
-        const std::int64_t d = s[i] - (std::int64_t{grav_n} * cfg.accel_offset_lsb[i]);
-        g[i] = MicroG32{static_cast<std::int32_t>(
-            rdiv(d * cfg.accel_gain_q30[i] * sa, std::int64_t{grav_n} * one_q30))};
-    }
-    return g;
+    return calibrated_mean(s, grav_n, cfg, sa);
 }
 
 // Half the turn of one sample, Q30 rad, per axis: w = gyro - bias in Q8 (LSB x 256),
@@ -155,20 +161,56 @@ constexpr void integrate(Stroke& s, const Raw& x, const gc_config& cfg, const Sc
     store(s);
 }
 
+// docs/core.md "Stroke end", tilt: at the end hold the accel reads gravity again. Rotated
+// by the stroke's q it should equal the start gravity g; the mismatch m is what the
+// orientation error of q now leaks into the rotated readings (end_mean: the end-hold accel
+// mean, board frame). Only the part across gravity
+// is kept (a tilt cannot make the rest), and none of it beyond tilt_max.
+[[nodiscard]] constexpr Vec3<MicroG> tilt_leak(const Vec3<MicroG32>& end_mean, const Quat& q,
+                                               const Vec3<MicroG32>& g) {
+    const Mat3 r = rotation(q);
+    const Vec3<MicroG> e{MicroG{end_mean[0].in<MicroG>()}, MicroG{end_mean[1].in<MicroG>()},
+                         MicroG{end_mean[2].in<MicroG>()}};
+    Vec3<MicroG> m{};
+    std::int64_t gg = 0;
+    std::int64_t mg = 0;
+    for (std::size_t i = 0; i < 3; ++i) {
+        m[i] = dot_q30(r[i], e) - MicroG{g[i].in<MicroG>()};
+        gg += std::int64_t{g[i].in<MicroG32>()} * g[i].in<MicroG32>();
+        mg += m[i].in<MicroG>() * g[i].in<MicroG32>();
+    }
+    const std::int64_t big_g = rdiv(gg, one_q20);
+    if (big_g == 0) {
+        return {};
+    }
+    const std::int64_t k = rdiv(mg, big_g); // Q20: the share of m along g
+    for (std::size_t i = 0; i < 3; ++i) {
+        m[i] -= MicroG{rdiv(k * g[i].in<MicroG32>(), one_q20)};
+        if (MicroG{iabs(m[i].in<MicroG>())} > tilt_max) {
+            return {};
+        }
+    }
+    return m;
+}
+
 // Zero-velocity correction. The board is at rest at the end (time big_t since s0), so the
-// velocity v_end left there is error. Taken as a constant acceleration error v_end / T, it
-// has moved a point at time t by c = v_end * t^2 / (2 T); subtract that, per axis. Returns
+// velocity left there is error, of two parts: vc from a constant acceleration error, which
+// has moved a point at time t by c = vc t^2 / (2 T), and the tilt leak, growing linearly to
+// lead at T, which has moved it by d = lead t^3 / (6 T). Subtract both, per axis. Returns
 // the extent of the corrected points: their largest |coordinate|, mm.
-[[nodiscard]] constexpr std::uint16_t
-correct_drift(std::span<gc_point> points, const Vec3<NanometersPerS>& v_end, Micros big_t) {
+[[nodiscard]] constexpr std::uint16_t correct_drift(std::span<gc_point> points,
+                                                    const Vec3<NanometersPerS>& vc,
+                                                    const Vec3<MicroG>& lead, Micros big_t) {
     std::uint16_t extent = 0;
     for (gc_point& pt : points) {
         const std::int64_t t = us(PointTicks{pt.t_100us});
         const std::array<std::int16_t*, 3> xs{&pt.x_mm, &pt.y_mm, &pt.z_mm};
         for (std::size_t i = 0; i < 3; ++i) {
             const Nanometers c{
-                rdiv(scaled(v_end[i].in<NanometersPerS>() * t, nm_s_us_to_nm) * t, 2 * us(big_t))};
-            *xs[i] = sat16(*xs[i] - round_to<Millimeters>(c).in<Millimeters>());
+                rdiv(scaled(vc[i].in<NanometersPerS>() * t, nm_s_us_to_nm) * t, 2 * us(big_t))};
+            const std::int64_t leak_t = rdiv(lead[i].in<MicroG>() * t, us(big_t)); // ug at t
+            const Nanometers d{scaled(scaled(leak_t * t, us_to_s) * t, ug_us_to_nm_s * sixth)};
+            *xs[i] = sat16(*xs[i] - round_to<Millimeters>(c + d).in<Millimeters>());
             const std::int32_t x = *xs[i];
             extent = std::max(extent, static_cast<std::uint16_t>(iabs(x)));
         }
@@ -178,9 +220,11 @@ correct_drift(std::span<gc_point> points, const Vec3<NanometersPerS>& v_end, Mic
 
 // End at the snapshot: the checks that need no points (CLIPPED, SHORT by duration, DRIFT),
 // then cut the points back to the snapshot, append it, correct_drift, and check the
-// extent. Returns 0 (a stroke) or GC_REJ_*.
+// extent. Returns 0 (a stroke) or GC_REJ_*. Called at the end-hold sample, after its
+// integration (s.q, s.t), with the raw accel sum of its still window.
 // DRIFT before the correction bounds v_end there (docs/core.md "Ranges").
-[[nodiscard]] constexpr std::uint8_t finish(Stroke& s, const gc_config& cfg) {
+[[nodiscard]] constexpr std::uint8_t finish(Stroke& s, const gc_config& cfg, std::int32_t sa,
+                                            const std::array<std::int64_t, 3>& end_accel_sum) {
     const Micros big_t = s.snap.t - s.t_s0;
     NanometersPerS v_max{};
     for (const NanometersPerS v : s.snap.v) {
@@ -211,7 +255,19 @@ correct_drift(std::span<gc_point> points, const Vec3<NanometersPerS>& v_end, Mic
     s.points[s.n] = point(s.snap.p, big_t);
     ++s.n;
 
-    s.extent_mm = correct_drift(std::span{s.points}.first(s.n), s.snap.v, big_t);
+    // The leak grows linearly to m at the end-hold sample, so it is lead at T; the velocity
+    // it left by T is lead T / 2, and the rest of v_end is the constant part vc.
+    const Vec3<MicroG> m =
+        tilt_leak(calibrated_mean(end_accel_sum, win_n, cfg, sa), s.q, s.gravity);
+    const Micros big_te = s.t - s.t_s0;
+    Vec3<MicroG> lead{};
+    Vec3<NanometersPerS> vc{};
+    for (std::size_t i = 0; i < 3; ++i) {
+        lead[i] = MicroG{rdiv(m[i].in<MicroG>() * us(big_t), us(big_te))};
+        const NanometersPerS vl{scaled(lead[i].in<MicroG>() * us(big_t), ug_us_to_nm_s * half)};
+        vc[i] = s.snap.v[i] - vl;
+    }
+    s.extent_mm = correct_drift(std::span{s.points}.first(s.n), vc, lead, big_t);
     if (s.extent_mm < cfg.min_extent_mm) {
         return GC_REJ_SHORT;
     }

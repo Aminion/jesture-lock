@@ -11,6 +11,8 @@ namespace gcore {
 inline constexpr std::int32_t one_q30 = 1 << 30;
 // 1.0 in Q8: the gyro bias and rates in LSB x 256.
 inline constexpr std::int32_t one_q8 = 1 << 8;
+// 1.0 in Q20: the share of the tilt mismatch along gravity (docs/core.md "Stroke end").
+inline constexpr std::int32_t one_q20 = 1 << 20;
 
 // C++26 renamed saturate_cast to saturating_cast (__cpp_lib_saturation_arithmetic 202603):
 // GCC 15 (firmware) has the old name, GCC 16 (host) the new one.

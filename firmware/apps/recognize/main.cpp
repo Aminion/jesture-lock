@@ -1,11 +1,11 @@
 // recognize firmware: IMU -> core/ on the MCU -> recognition events over UART.
 //
 // For now a board self-test of core/: at boot it replays the embedded vector
-// (core/contract/vectors/v1/, written by `gesture-cli vectors`) through gc_feed and checks that the
+// (core/contract/vectors/v2/, written by `gesture-cli vectors`) through gc_feed and checks that the
 // MCU build gives the same events, strokes and live points as the host build, bit for bit (the
 // digest is defined in host/crates/gesture-cli/src/vector.rs). It also times every gc_feed against
 // the sample period and measures the stack peak. The result is in `bench_result`, read over SWD
-// (core/contract/vectors/v1/README.md); the LED blinks slowly on a match, fast otherwise.
+// (core/contract/vectors/v2/README.md); the LED blinks slowly on a match, fast otherwise.
 //
 // It also embeds the board's calibration file (docs/calibration.md) and checks it at build
 // time; the config made from it waits for the live IMU feed.

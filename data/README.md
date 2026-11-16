@@ -11,7 +11,7 @@ sensor scale is in the Hello frames (`ctrl1_xl`, `ctrl2_g`).
 duration, and the stream health from the recording (samples, rate, failures).
 
 The conformance vectors cut from these sessions live with the contract, in
-`core/contract/vectors/v1/` (`gesture-cli vectors`).
+`core/contract/vectors/v2/` (`gesture-cli vectors`).
 
 `calibration/board.cal`: the board's calibration file, written by `gesture-cli calibrate`
 (`docs/calibration.md`). The run that made it is the `sessions/*_calibrate.bin` of the same

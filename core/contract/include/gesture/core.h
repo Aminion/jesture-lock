@@ -1,6 +1,6 @@
 /*
- * Gesture recognition core: C ABI, contract in docs/core.md. ABI version 1 (frozen
- * 2026-10-30).
+ * Gesture recognition core: C ABI, contract in docs/core.md. ABI version 2 (draft
+ * 2026-11-16; version 1 frozen 2026-10-30).
  *
  * Consumed by the recognize firmware (MCU) and by host/crates/gesture-core (Rust FFI).
  * Pure: no I/O, no clock, no global state; the caller owns all state buffers.
@@ -27,7 +27,7 @@ extern "C" {
 /* docs/core.md: "Enumerations are integer #define, never C enum" (another language may
  * implement this contract directly; a C++ enum has no such guarantee). */
 // NOLINTBEGIN(cppcoreguidelines-macro-usage)
-#define GC_ABI_VERSION 1u
+#define GC_ABI_VERSION 2u
 #define GC_STATE_SIZE  2048u
 #define GC_STATE_ALIGN 8u
 

@@ -5,7 +5,7 @@
 
 use core::mem::{align_of, offset_of, size_of};
 
-pub const GC_ABI_VERSION: u32 = 1;
+pub const GC_ABI_VERSION: u32 = 2;
 pub const GC_STATE_SIZE: usize = 2048;
 pub const GC_STATE_ALIGN: usize = 8;
 
